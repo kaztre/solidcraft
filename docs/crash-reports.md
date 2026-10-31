@@ -46,6 +46,21 @@ stays editable for retrying. Copying or opening a report does not modify the des
 `SOLIDCRAFT_CRASH_DIR` overrides the folder. `solidcraft --crash-log` and
 `solidcraft-cli crashes dir` print it.
 
+## The app's log
+
+The desktop app also keeps a log in `logs/`, next to `crashes/` (on macOS
+`~/Library/Application Support/SolidCraft/logs`). There is one file per run, named
+`<time>-<process id>.log`, with one timestamped line per entry:
+
+- the version, commit and system the app started on
+- the startup steps and the renderer it got
+- every command that changed the design, with how long it took
+- every command that failed, with its error
+- the warnings and errors SolidCraft and its libraries log
+
+`RUST_LOG=debug` adds more detail. A run's log stops at 4 MB with a line saying so, and the
+newest 10 logs are kept (`solidcraft_engine::session_log`). The log stays on this computer.
+
 ## For agents
 
 All of these read the same folder:

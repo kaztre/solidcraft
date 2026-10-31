@@ -173,7 +173,7 @@ pub fn utc(secs: u64) -> String {
     format!("{y:04}-{m:02}-{d:02}T{h:02}:{mi:02}:{s:02}Z")
 }
 
-fn stamp(secs: u64) -> String {
+pub(crate) fn stamp(secs: u64) -> String {
     let (y, m, d, h, mi, s) = civil(secs);
     format!("{y:04}{m:02}{d:02}-{h:02}{mi:02}{s:02}")
 }
@@ -347,6 +347,7 @@ pub fn set_environment(text: &str) {
         && let Ok(mut e) = s.environment.lock()
     {
         *e = limited(text, 500);
+        log::info!("environment: {}", *e);
         if let Ok(mut j) = s.journal.lock() {
             let line = json!({ "environment": *e }).to_string();
             j.write(&line);
@@ -364,6 +365,7 @@ pub fn phase(step: &str) {
         if j.phase_step.as_deref() == Some(step) {
             return;
         }
+        log::info!("startup step: {}", limited(step, 200));
         let line = json!({ "phase": limited(step, 200), "ms": now_ms().saturating_sub(s.started_ms) }).to_string();
         j.write(&line);
         j.phase = Some(line);

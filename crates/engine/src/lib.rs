@@ -29,6 +29,7 @@ pub mod render_jobs;
 pub mod render_lights;
 pub mod sample;
 pub mod schema;
+pub mod session_log;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod slicer_files;
 mod slicer_icon;
@@ -1661,6 +1662,7 @@ impl Session {
             crash::command_begin(self, spec.id, given);
         }
         let scope = crash::Scope::enter();
+        let started = web_time::Instant::now();
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match live {
             Some(run) => run(self, params),
             None => (spec.run)(self, params).map(|v| (v, None)),
@@ -1714,6 +1716,15 @@ impl Session {
             None
         };
         let changed = !Arc::ptr_eq(&self.doc, &before.doc);
+        // The app's log (session_log) keeps what changed the design and what failed.
+        if outermost {
+            let ms = started.elapsed().as_millis();
+            match &r {
+                Err(e) => log::warn!("{} failed after {ms} ms: {e}", spec.id),
+                Ok(_) if changed => log::info!("{} ({ms} ms)", spec.id),
+                Ok(_) => {}
+            }
+        }
         // Hiding or showing (`browser.visibility`) leaves the document alone, so it needs its own
         // test: it is saved with the design and has an undo step of its own.
         let hidden = self.visibility != before.visibility;
