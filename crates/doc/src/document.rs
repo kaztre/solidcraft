@@ -892,6 +892,10 @@ pub enum FeatureKind {
         /// Buttress forms: which way the steep flank of the screw's teeth faces.
         #[serde(default, skip_serializing_if = "crate::thread_forms::is_default")]
         steep_flank: crate::thread_forms::SteepFlank,
+        /// A modelled internal thread in a hole too narrow for its teeth bores the hole to the
+        /// size's tap drill first (`thread::bore_to_drill`); false: such a hole is refused.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        bore: bool,
     },
     /// Ruled loft through profiles of several sketches, in order.
     Loft {
