@@ -1,11 +1,10 @@
 //! SolidCraft headless command line.
 //!
 //! ```text
-//! solidcraft-cli run <script.json|design.sc|part.step|mesh.3mf> [--in design|part.step|mesh.3mf] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--json-out FILE] [--allow-errors]
-//!                    [--param-check off|warn|strict]
+//! solidcraft-cli run <script.json|design.sc|part.step|mesh.3mf> [--in design|part.step|mesh.3mf] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--json-out FILE] [--allow-errors] [--validation MODE]
 //! solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] (alias: inspect) measurements as JSON
 //! solidcraft-cli script <design.sc> [--out script.json]     the design's history as a command script
-//! solidcraft-cli bench-open <design.sc | part.step> [--parse-only] [--save OUT.sc] [--display LEVEL [--edit NAME EXPR]] [--ops script.json] loading timings as JSON lines
+//! solidcraft-cli bench-open <design.sc | part.step> [--parse-only] [--save OUT.sc] [--display LEVEL [--edit NAME EXPR]] [--ops script.json] [--heaviest N] loading timings as JSON lines
 //! solidcraft-cli bench-agent [--scale F] [--save F] [--script-out F] a ~1,300-body design built command by command, timed
 //! solidcraft-cli bench-assistant --connect 127.0.0.1:PORT [--token T] --base-url URL --model NAME [--tasks 1,2,5] [--repeat N]
 //!                                 [--timeout-s 300] [--json out.json] [--markdown out.md]
@@ -69,7 +68,7 @@ const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.sc|part.step
 /// `script`'s lines in the usage.
 const USAGE_SCRIPT: &str = "  solidcraft-cli script <design.sc|script.json> [--out script.json]\n      (the design's history as a command script that eval and run replay)\n";
 /// `bench-open`'s lines in the usage.
-const USAGE_BENCH_OPEN: &str = "  solidcraft-cli bench-open <design.sc | part.step> [--parse-only] [--save OUT.sc] [--display LEVEL [--edit NAME EXPR]] [--ops script.json] [--profile] [--profile-out trace.json]\n      (--profile and --profile-out as for run)\n      (--ops: after opening, run each command of the script and undo it, timing the command, the\n       evaluations it caused and the view it leaves: placing and meshing what changed)\n";
+const USAGE_BENCH_OPEN: &str = "  solidcraft-cli bench-open <design.solidcraft | part.step> [--parse-only] [--save OUT.solidcraft] [--display LEVEL [--edit NAME EXPR]] [--ops script.json] [--heaviest N] [--profile] [--profile-out trace.json]\n      (--profile and --profile-out as for run; --heaviest: the N bodies with the most triangles)\n      (--ops: after opening, run each command of the script and undo it, timing the command, the\n       evaluations it caused and the view it leaves: placing and meshing what changed)\n";
 /// `bench-agent`'s lines in the usage.
 const USAGE_BENCH_AGENT: &str = "  solidcraft-cli bench-agent [--scale F] [--save design.sc] [--script-out script.json]\n";
 /// `bench-assistant`'s lines in the usage.
@@ -1004,6 +1003,31 @@ pub(crate) fn cmd_bench_open(args: &[String]) -> Result<(), String> {
         json!({"step": "mesh", "ms": t.elapsed().as_secs_f64() * 1000.0, "place_ms": place_ms, "bodies": st.bodies.len(), "triangles": triangles})
     );
     let flag = |name: &str| args.iter().position(|a| a == name);
+    // `--heaviest N`: the N bodies with the most triangles, with their faces and size (what makes a
+    // large model slow to draw).
+    if let Some(n) = flag("--heaviest").and_then(|i| args.get(i + 1)).and_then(|n| n.parse::<usize>().ok()) {
+        let mut heavy: Vec<_> = st.bodies.iter().map(|b| (b.mesh().triangles.len(), b)).collect();
+        heavy.sort_by_key(|(tris, _)| std::cmp::Reverse(*tris));
+        for (tris, b) in heavy.into_iter().take(n) {
+            // Its densest faces in the display plan: the boundary nodes its edges gave it against
+            // the points inside, so an edge sampled too finely shows apart from a face refined too far.
+            let mut faces: Vec<Value> = b
+                .display_plan()
+                .map(|p| {
+                    p.faces
+                        .iter()
+                        .map(|f| json!({"face": f.face, "triangles": f.triangles.len(), "boundary": f.fixed.len(), "points": f.uv.len()}))
+                        .collect()
+                })
+                .unwrap_or_default();
+            faces.sort_by_key(|f| std::cmp::Reverse(f["triangles"].as_u64().unwrap_or(0)));
+            faces.truncate(5);
+            println!(
+                "{}",
+                json!({"step": "heaviest", "body": b.name, "triangles": tris, "faces": b.body.face_count(), "size": b.body.size(), "share": tris as f64 / triangles.max(1) as f64, "densest": faces})
+            );
+        }
+    }
     // `--save PATH`: save the opened design without its model cache (to PATH.plain.sc) and
     // as the app does, with it, then read the cache back.
     let s = match flag("--save").and_then(|i| args.get(i + 1)) {
