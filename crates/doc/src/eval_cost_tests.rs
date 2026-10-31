@@ -1069,6 +1069,7 @@ fn placed_parts(comps: usize, bodies: usize, sketches: usize, taps: usize, copie
                 form: Default::default(),
                 hand: Default::default(),
                 starts: 1,
+                clearance: 0.0,
             });
         }
     }
@@ -1280,6 +1281,9 @@ fn marking(p: Vec3) -> FeatureKind {
         chamfer_depth: None,
         steep_flank: Default::default(),
         old_auto_size: false,
+        fit_hole: false,
+        flip: false,
+        print_clearance: None,
     }
 }
 

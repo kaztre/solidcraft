@@ -214,6 +214,26 @@ pub struct GrooveProfile {
 }
 
 impl GrooveProfile {
+    /// The groove of the tooth offset `c` away from its mate, for a printed part's clearance:
+    /// every wall moves `c` into the material along its normal, the flanks, the root and the
+    /// crest (a hole's crest out with its bore, a shaft's in with its turned-down surface). The
+    /// crest flat, at the moved crest, narrows by c (sec - tan) for each flank.
+    pub fn with_clearance(mut self, c: f64) -> GrooveProfile {
+        let (lo, hi) = (self.flank_lo, self.flank_hi);
+        self.crest_flat -= c * ((1.0 / lo.cos() - lo.tan()) + (1.0 / hi.cos() - hi.tan()));
+        let out = if self.internal { c } else { -c };
+        self.crest_r += out;
+        self.root_r += out;
+        self
+    }
+
+    /// The largest clearance [`Self::with_clearance`] leaves a crest flat on this tooth with.
+    pub fn max_clearance(&self, pitch: f64) -> f64 {
+        let (lo, hi) = (self.flank_lo, self.flank_hi);
+        let per = (1.0 / lo.cos() - lo.tan()) + (1.0 / hi.cos() - hi.tan());
+        if per > 0.0 { ((self.crest_flat - 0.04 * pitch) / per).min(0.25 * pitch).max(0.0) } else { 0.25 * pitch }
+    }
+
     /// The groove's axial width at radius `r`: the pitch less the tooth there.
     pub fn width(&self, pitch: f64, r: f64) -> f64 {
         // How far `r` is from the crest towards the root (negative past the crest, in the air

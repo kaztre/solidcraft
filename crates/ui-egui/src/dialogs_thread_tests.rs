@@ -63,7 +63,8 @@ fn shown(row: &str) -> bool {
 fn every_option_reaches_the_command() {
     let mut h = shaft();
     let untouched = params(&h);
-    assert_eq!(untouched.as_object().unwrap().keys().collect::<Vec<_>>(), ["face"], "defaults stay out of the command: {untouched}");
+    // The dialog's one default the command lacks: a hole is made the size's tap drill.
+    assert_eq!(untouched.as_object().unwrap().keys().collect::<Vec<_>>(), ["face", "fit_hole"], "defaults stay out of the command: {untouched}");
     choose(&mut h, "Form", "Trapezoidal (ISO 2904)");
     choose(&mut h, "Size", "20 mm");
     assert_eq!(params(&h)["designation"], "Tr20x4", "a new size takes its standard pitch");
@@ -79,6 +80,7 @@ fn every_option_reaches_the_command() {
     type_in(&mut h, "Chamfer Angle", "30 deg");
     type_in(&mut h, "Chamfer Depth", "0.5 mm");
     click(&mut h, &["dialog:Modeled"]);
+    click(&mut h, &["dialog:Flip start"]);
     let mut p = params(&h);
     p.as_object_mut().unwrap().remove("face");
     assert_eq!(
@@ -86,9 +88,15 @@ fn every_option_reaches_the_command() {
         json!({
             "designation": "Tr20x4", "form": "trapezoidal", "hand": "left", "starts": 2, "extent": "length", "length": "6 mm",
             "ease_out": "1.5 mm", "tip": "start", "chamfer_angle": "30 deg", "chamfer_depth": "0.5 mm",
-            "modeled": true,
+            "modeled": true, "flip": true, "fit_hole": true,
         })
     );
+    click(&mut h, &["dialog:Resize hole to tap drill"]);
+    assert!(params(&h).get("fit_hole").is_none(), "unticked, the hole is left as it is");
+    click(&mut h, &["dialog:3D printed"]);
+    assert_eq!(params(&h)["print_clearance"], "0.075 mm", "a printed thread starts with 0.075 mm clearance");
+    type_in(&mut h, "Print clearance", "0.1 mm");
+    assert_eq!(params(&h)["print_clearance"], "0.1 mm");
     // An empty fade length is ISO 3508's standard runout; a square end has none.
     click(&mut h, &["dialog:Fade Length"]);
     h.step(&json!({"key":"A","cmd":true})).unwrap();
