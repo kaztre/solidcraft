@@ -10,6 +10,7 @@
 pub mod agent_setup;
 pub mod batch_params;
 pub mod batch_preflight;
+pub mod bug_report;
 pub mod capture;
 pub mod cmd;
 pub mod control_auth;

@@ -857,6 +857,8 @@ fn main() -> eframe::Result {
             solidcraft_ui_egui::fonts::load_system_fonts_in_background(&cc.egui_ctx);
             mark("fonts");
             let mut app = SolveApp::new(Session::default(), services(cc));
+            // Report a bug saves here (solidcraft_engine::bug_report).
+            app.issue_report.dir = solidcraft_engine::bug_report::default_dir();
             app.apply_off_thread = Some(solidcraft_ui_egui::dialogs::APPLY_AT_ONCE);
             app.custom_titlebar = custom_titlebar;
             #[cfg(target_os = "windows")]

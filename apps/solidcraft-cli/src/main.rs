@@ -39,6 +39,7 @@ mod preview;
 mod profiling;
 mod recipe;
 mod render;
+mod reports;
 mod spatial;
 
 use std::process::ExitCode;
@@ -91,6 +92,8 @@ const USAGE_FUZZ: &str =
 const USAGE_MCP: &str = "  solidcraft-cli mcp [--headless] [--in design.solidcraft|script.json] [--connect 127.0.0.1:PORT [--token T]] [--allow-path DIR]... [--allow-any-path]\n                     [--param-check off|warn|strict] [--render-gpu]\n  solidcraft-cli mcp setup [--dry-run] [--client opencode|claude-desktop|claude-code|cursor] [--live]\n      (adds a `solidcraft` server, with this program's path, to each installed AI client; --live adds `solidcraft-live` for the running app; alias: mcp install)\n";
 /// `crashes`'s lines in the usage.
 const USAGE_CRASHES: &str = "  solidcraft-cli crashes [list [--json] | show <id> | replay <id> | dir | clear [<id>]]\n";
+/// `reports`'s lines in the usage.
+const USAGE_REPORTS: &str = "  solidcraft-cli reports [list [--open|--fixed] [--json] | show <id> | replay <id> | status <id> [open|fixed] [--issue N] [--commit SHA]\n                         | issue-text <id> [--json] | dir | clear <id>|--fixed]\n      (the bug reports Report a bug saved on this computer: replay runs the report's commands, then the open dialog's)\n";
 /// `licences`'s lines in the usage.
 const USAGE_LICENCES: &str = "  solidcraft-cli licences\n";
 /// `gpu`'s lines in the usage.
@@ -126,6 +129,7 @@ const COMMANDS: &[Command] = &[
     Command { name: "fuzz-one", usage: USAGE_FUZZ_ONE, listed: false },
     Command { name: "mcp", usage: USAGE_MCP, listed: true },
     Command { name: "crashes", usage: USAGE_CRASHES, listed: true },
+    Command { name: "reports", usage: USAGE_REPORTS, listed: true },
     Command { name: "licences", usage: USAGE_LICENCES, listed: true },
     Command { name: "licenses", usage: USAGE_LICENCES, listed: false },
     Command { name: "gpu", usage: USAGE_GPU, listed: true },
@@ -188,6 +192,7 @@ fn main() -> ExitCode {
         Some("fuzz-one") => fuzz::one(&args[1..]),
         Some("mcp") => cmd_mcp(&args[1..]),
         Some("crashes") => crashes::run(&args[1..]),
+        Some("reports") => reports::run(&args[1..]),
         Some("icon") => cmd_icon(&args[1..]),
         Some("licences" | "licenses") => {
             // Written, not print!ed: a closed pipe (`| head`) is not a crash.

@@ -556,7 +556,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     t.app_bar_text,
                 );
             }
-            crate::i18n::tr_label("Report a bug — review a screenshot and open a GitHub draft")
+            crate::i18n::tr("ui.bug_report_tooltip")
         };
         if response.on_hover_text(tip).clicked() {
             crate::help::run(app, &ui.ctx().clone(), "report");

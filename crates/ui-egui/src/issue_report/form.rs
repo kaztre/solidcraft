@@ -2,15 +2,12 @@
 
 use egui::{Id, Ui, vec2};
 
-use super::{Draft, MAX_ANSWER, MAX_BODY, draft_url};
-use crate::{SolveApp, i18n::tr_label, ui_kit};
-
-const ALL_GUIDANCE: [&str; 4] = [
-    "Report text copied. Paste it into GitHub and submit your report there.",
-    "Review your report on GitHub and click Submit new issue to publish it.",
-    "Opens your browser and copies the report text for you to paste into GitHub.",
-    "Opens your browser. Review and submit your report on GitHub.",
-];
+use super::{Draft, MAX_ANSWER, MAX_BODY};
+use crate::{
+    SolveApp,
+    i18n::{tr, tr_label},
+    ui_kit,
+};
 
 fn answer(ui: &mut Ui, label: &str, hint: &str, text: &mut String, id: &str, rows: usize) -> egui::Response {
     ui_kit::text(ui, tr_label(label), ui_kit::Text::Heading(label));
@@ -37,8 +34,7 @@ fn screenshot_actions(app: &mut SolveApp, draft: &mut Draft, ui: &mut Ui) -> boo
                 && let Some(image) = draft.image.as_ref()
             {
                 ui.ctx().copy_image((**image).clone());
-                draft.opened_github = false;
-                draft.note = "Paste the image into the GitHub draft, or save the PNG if image copying is unavailable.".into();
+                draft.note = tr("ui.bug_report_screenshot_copied").into();
             }
             if ui_kit::button(ui, tr_label("Save screenshot…"), ui_kit::Button::Enabled(app.services.pick_save.is_some())).clicked()
                 && let Some(image) = draft.image.clone()
@@ -48,7 +44,7 @@ fn screenshot_actions(app: &mut SolveApp, draft: &mut Draft, ui: &mut Ui) -> boo
                     let result = crate::control::save_screenshot(&image, Some(&path));
                     if let Some(draft) = app.issue_report.draft.as_mut() {
                         draft.note = if result.get("ok").and_then(serde_json::Value::as_bool) == Some(true) {
-                            "Screenshot saved. Attach the PNG in the GitHub draft.".into()
+                            tr("ui.bug_report_screenshot_file_saved").into()
                         } else {
                             format!("Could not save screenshot: {}", super::debug(&result.get("error"), 1000))
                         };
@@ -70,11 +66,7 @@ fn screenshot(app: &mut SolveApp, draft: &mut Draft, ui: &mut Ui) -> bool {
     });
     let mut retake = false;
     let guidance = |ui: &mut Ui| {
-        ui_kit::text(
-            ui,
-            tr_label("This image is not attached to GitHub yet. Copy or save it, then attach it on GitHub."),
-            ui_kit::Text::Note("screenshot"),
-        );
+        ui_kit::text(ui, tr("ui.bug_report_screenshot_kept"), ui_kit::Text::Note("screenshot"));
     };
     if let Some(texture) = preview {
         ui.add(egui::Image::new(&texture).max_size(vec2(ui.available_width(), 130.0)).maintain_aspect_ratio(true));
@@ -95,7 +87,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
         .anchor(egui::Align2::CENTER_TOP, vec2(0.0, t.space_16))
         .fields()
         .keep_open_on_escape()
-        .actions(tr_label("Continue on GitHub"), tr_label("Close draft"), Some(tr_label("Copy report")))
+        .actions(tr("ui.bug_report_save"), tr_label("Close draft"), Some(tr_label("Copy report")))
         .show(ctx, true, |ui| {
             // The card's own header, footer and margins come on top of the scrolling body.
             let chrome = ui_kit::header_height() + t.form_footer_height + 6.0 * t.space_8;
@@ -109,31 +101,20 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                     .min_scrolled_height(scroll)
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        let body = draft.report_body();
-                        let (_, copy_needed) = draft_url(&draft.report_title(), &body);
-                        let guidance = if draft.opened_github {
-                            if copy_needed {
-                                "Report text copied. Paste it into GitHub and submit your report there."
-                            } else {
-                                "Review your report on GitHub and click Submit new issue to publish it."
-                            }
-                        } else if copy_needed {
-                            "Opens your browser and copies the report text for you to paste into GitHub."
-                        } else {
-                            "Opens your browser. Review and submit your report on GitHub."
-                        };
-                        // Reserve the tallest wording, so the card (and its footer) keeps its height as the
+                        let saved = draft.saved.as_ref().map(|id| crate::i18n::format("ui.bug_report_saved", &[("id", id)]));
+                        let guidance = saved.clone().unwrap_or_else(|| tr("ui.bug_report_saves_locally").to_string());
+                        // Reserve the taller wording, so the card (and its footer) keeps its height as the
                         // guidance changes under a click.
                         let width = ui.available_width();
                         let font = egui::FontId::proportional(t.font_small);
-                        let tallest = ALL_GUIDANCE
+                        let example = crate::i18n::format("ui.bug_report_saved", &[("id", "20261031-120000-001")]);
+                        let tallest = [tr("ui.bug_report_saves_locally"), example.as_str()]
                             .iter()
-                            .map(|g| ui.painter().layout(tr_label(g).to_string(), font.clone(), t.form_dim, width).size().y)
+                            .map(|g| ui.painter().layout(g.to_string(), font.clone(), t.form_dim, width).size().y)
                             .fold(0.0_f32, f32::max);
                         ui.allocate_ui(vec2(width, tallest), |ui| {
-                            ui_kit::text(ui, tr_label(guidance), ui_kit::Text::Note("guidance"));
+                            ui_kit::text(ui, &guidance, ui_kit::Text::Note("guidance"));
                         });
-                        ui_kit::text(ui, tr_label("Reports are public. A GitHub account is required."), ui_kit::Text::Note("public"));
                         ui_kit::divider(ui, "report");
                         ui_kit::text(ui, tr_label("Summary"), ui_kit::Text::Heading("Summary"));
                         let response = ui_kit::bounded_cell_editor(
@@ -145,12 +126,12 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                             160,
                         );
                         if response.changed() {
-                            draft.opened_github = false;
+                            draft.saved = None;
                         }
                         super::truncate(&mut draft.title, 160);
                         let response = answer(ui, "What happened?", "Describe the problem you saw", &mut draft.description, "issue_report_body", 3);
                         if response.changed() {
-                            draft.opened_github = false;
+                            draft.saved = None;
                         }
                         crate::scenario::publish_rect("report:description", response.rect);
                         if !draft.focus_requested || draft.missing_description {
@@ -176,7 +157,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                         let expected =
                             answer(ui, "Expected result (optional)", "What did you expect to see?", &mut draft.expected, "issue_report_expected", 2);
                         if steps.changed() || expected.changed() {
-                            draft.opened_github = false;
+                            draft.saved = None;
                         }
                         retake = screenshot(app, draft, ui);
                         ui_kit::text(
@@ -188,7 +169,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                             let response =
                                 ui_kit::text_area(ui, tr_label("Technical details"), Id::new("issue_report_technical"), &mut draft.body, 8, MAX_BODY);
                             if response.changed() {
-                                draft.opened_github = false;
+                                draft.saved = None;
                             }
                             super::truncate(&mut draft.body, MAX_BODY);
                         });
@@ -200,20 +181,21 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
     match action {
         ui_kit::Action::Ok => {
             draft.missing_description = draft.description.trim().is_empty();
-            if !draft.missing_description {
-                let body = draft.report_body();
-                let (url, copy_needed) = draft_url(&draft.report_title(), &body);
-                if copy_needed {
-                    ctx.copy_text(body);
+            // Saved and not edited since: a second click would only make a copy.
+            if !draft.missing_description && draft.saved.is_none() {
+                match super::save(app, draft) {
+                    Ok(id) => {
+                        draft.saved = Some(id);
+                        draft.note.clear();
+                    }
+                    Err(e) => draft.note = crate::i18n::format("ui.bug_report_not_saved", &[("error", &e)]),
                 }
-                ctx.open_url(egui::OpenUrl::new_tab(url));
-                draft.opened_github = true;
                 ctx.request_repaint();
             }
         }
         ui_kit::Action::Apply => {
             ctx.copy_text(draft.report_body());
-            draft.note = "Report copied. Paste it into the GitHub draft if needed.".into();
+            draft.note = tr("ui.bug_report_text_copied").into();
         }
         _ => {}
     }
