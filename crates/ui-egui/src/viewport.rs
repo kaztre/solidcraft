@@ -161,7 +161,8 @@ pub struct ViewportState {
     pub hover_feature: Option<u64>,
     /// Bodies whose browser row is under the cursor: highlighted the same way.
     pub hover_bodies: Vec<String>,
-    /// The model point an orbit turns around (Preferences: orbit around the cursor).
+    /// The model point an orbit turns around, chosen when the drag begins (Preferences: orbit
+    /// around the cursor, or the view centre seated on the model).
     pub orbit_pivot: Option<Vec3>,
     /// The orbit drag under way, summed from where it began (see [`crate::navigation::orbit`]).
     pub orbit_from: Option<crate::navigation::OrbitFrom>,
@@ -393,12 +394,17 @@ pub fn view_bounds(app: &SolveApp) -> solidcraft_engine::geom::Aabb3 {
 /// view is far from other geometry (a part far from the origin and a sketch at it, #2616), and
 /// the part then swings out of view. `None` when no body is in view.
 pub(crate) fn in_view_centre(app: &SolveApp, proj: &Proj) -> Option<Vec3> {
+    let b = in_view_bounds(app, proj);
+    (!b.is_empty()).then(|| b.center())
+}
+
+/// The box around the shown bodies the view shows part of (empty when none is in view).
+pub(crate) fn in_view_bounds(app: &SolveApp, proj: &Proj) -> solidcraft_engine::geom::Aabb3 {
     let st = crate::open_meshing::shown_world(app);
-    let b = body_bounds(app, &st)
+    body_bounds(app, &st)
         .iter()
         .filter(|(name, b)| !b.is_empty() && app.session.body_visible(name) && in_view(proj, b))
-        .fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, (_, b)| a.union(b));
-    (!b.is_empty()).then(|| b.center())
+        .fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, (_, b)| a.union(b))
 }
 
 /// Does the view show part of box `b`? A box partly behind the eye counts.
@@ -9838,6 +9844,54 @@ mod tests {
             assert!((back.pitch - start.pitch).abs() < 1e-6, "{start:?} -> {back:?}");
             assert!((back.target - start.target).len() < 1e-4, "back where it began: {start:?} -> {back:?}");
             send(&mut h, egui::Event::PointerButton { pos: at, button: egui::PointerButton::Middle, pressed: false, modifiers: shift });
+        }
+    }
+
+    /// Report 20261031-092242-001: after panning and zooming over empty space the view centre lay
+    /// far behind the part, and a view-centre orbit swung the part out of view. The orbit now
+    /// seats the centre on the part first, without moving the picture.
+    #[test]
+    fn a_view_centre_orbit_turns_about_the_part_after_pan_and_zoom_in_empty_space() {
+        for perspective in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.preferences.orbit_around = crate::prefs::OrbitAround::ViewCentre;
+            h.app.ui.perspective = perspective;
+            h.app.run("solid.box", json!({"length":80,"width":50,"height":20})).unwrap();
+            h.app.fit_view();
+            h.frames(2);
+            let rect = h.app.viewport.rect.unwrap();
+            let b = view_bounds(&h.app);
+            let centre = b.center();
+            let drift = |h: &mut crate::scenario::Harness, by: Vec3| {
+                h.app.cam.target += by;
+                if h.app.perspective_view() {
+                    h.app.cam.distance += by.dot(-h.app.cam.back());
+                }
+            };
+            // The centre 400 mm behind the part, on the same line of sight: the same picture.
+            let fit = h.app.cam;
+            drift(&mut h, -fit.back() * 400.0);
+            let seen = projection(&h.app, rect).to_screen(centre).unwrap();
+            crate::navigation::seat_view_centre(&mut h.app, rect);
+            assert!(b.contains(h.app.cam.target), "perspective={perspective}: {:?}", h.app.cam);
+            assert!(projection(&h.app, rect).to_screen(centre).unwrap().distance(seen) < 1e-3, "the picture does not move");
+            h.app.viewport.orbit_pivot = None;
+            drift(&mut h, -fit.back() * 400.0);
+            h.call("ui.drag", json!({"x0":800,"y0":500,"x1":1000,"y1":420,"button":"middle","shift":true,"steps":20}));
+            assert_ne!(h.app.cam.back(), fit.back(), "the drag orbits");
+            let after = projection(&h.app, rect).to_screen(centre).unwrap();
+            assert!(after.distance(rect.center()) < rect.height() / 4.0, "perspective={perspective}: the part swung to {after:?}");
+            assert!(h.app.viewport.orbit_pivot.is_none(), "the drag's end clears the seat");
+            // Panned off the part as well: the centre comes to the part's depth on its own line.
+            h.app.fit_view();
+            let fit = h.app.cam;
+            let (right, _, _) = fit.basis();
+            drift(&mut h, right * 300.0 - fit.back() * 400.0);
+            let before = h.app.cam.target;
+            crate::navigation::seat_view_centre(&mut h.app, rect);
+            let f = -fit.back();
+            assert!((h.app.cam.target - centre).dot(f).abs() < 1e-6, "perspective={perspective}: {:?}", h.app.cam);
+            assert!((h.app.cam.target - before).cross(f).len() < 1e-6);
         }
     }
 
