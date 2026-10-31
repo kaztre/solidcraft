@@ -771,7 +771,10 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
             let mut params = json!({"motion":if mode == NavMode::Pan {"pan"} else {"orbit"},"delta":[delta.x,delta.y]});
             if mode == NavMode::Orbit {
                 let pivot = match app.preferences.orbit_around {
-                    crate::prefs::OrbitAround::ViewCentre => None,
+                    crate::prefs::OrbitAround::ViewCentre => {
+                        seat_view_centre(app, rect);
+                        None
+                    }
                     crate::prefs::OrbitAround::Origin => Some(Vec3::ZERO),
                     crate::prefs::OrbitAround::Cursor => Some(match app.viewport.orbit_pivot {
                         Some(pivot) => pivot,
@@ -1097,7 +1100,9 @@ pub(crate) fn orbit_drag(app: &mut SolveApp, rect: Rect, dx: f64, dy: f64, press
     let pivot = if around_cursor {
         match app.preferences.orbit_around {
             crate::prefs::OrbitAround::Origin => Some(Vec3::ZERO),
-            _ => app.viewport.orbit_pivot,
+            crate::prefs::OrbitAround::Cursor => app.viewport.orbit_pivot,
+            // The target, seated on the model when the drag began.
+            crate::prefs::OrbitAround::ViewCentre => None,
         }
     } else {
         None
@@ -1140,10 +1145,17 @@ pub(crate) fn middle_double_click(app: &mut SolveApp, ui: &egui::Ui, inside: boo
 /// origin, or the model point that was under the cursor when the drag began. The origin and the
 /// cursor pivot are kept still on screen; a cursor drag that begins over empty space turns around
 /// the centre of the visible geometry instead, so the model never swings around a far-off point.
-/// The cursor pivot is chosen once, when the drag begins.
+/// The cursor pivot is chosen once, when the drag begins; so is the view centre's depth
+/// ([`seat_view_centre`]).
 pub fn orbit(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Option<Pos2>) {
     let pivot = match app.preferences.orbit_around {
-        OrbitAround::ViewCentre => None,
+        OrbitAround::ViewCentre => {
+            // A press that has not moved (a click) leaves the camera as it is.
+            if dx != 0.0 || dy != 0.0 {
+                seat_view_centre(app, rect);
+            }
+            None
+        }
         OrbitAround::Origin => Some(Vec3::ZERO),
         OrbitAround::Cursor => Some(match app.viewport.orbit_pivot {
             Some(p) => p,
@@ -1198,6 +1210,43 @@ fn spin_pivot(app: &mut SolveApp, rect: Rect) -> Option<Vec3> {
             }
         }),
     }
+}
+
+/// A view-centre orbit turns about the camera's target, which panning and zooming to the cursor
+/// over empty space can leave far in front of or behind the model, so the model swings around a
+/// point out of view. When a drag begins with the target outside the model in view, the target
+/// slides along the line of sight to the middle of the model there (to the model's depth when the
+/// view's centre is off the model). The picture does not change. Done once per drag: the seated
+/// target is kept in `orbit_pivot`, which the drag's end clears.
+pub(crate) fn seat_view_centre(app: &mut SolveApp, rect: Rect) {
+    if app.viewport.orbit_pivot.is_some() {
+        return;
+    }
+    let proj = projection(app, rect);
+    let mut b = crate::viewport::in_view_bounds(app, &proj);
+    if b.is_empty() {
+        b = crate::viewport::view_bounds(app);
+    }
+    // The projection's camera: it says whether the picture is in perspective.
+    let cam = proj.cam;
+    if !b.is_empty() && !b.contains(cam.target) {
+        let f = -cam.back();
+        // In a perspective view the target stays in front of the eye.
+        let near = if cam.fov > 0.0 { -cam.distance * 0.99 } else { f64::NEG_INFINITY };
+        let through = crate::viewport::ray_box(cam.target, f, &b, 0.0)
+            .zip(crate::viewport::ray_box(cam.target, -f, &b, 0.0).map(|t| -t))
+            .filter(|&(_, exit)| exit > near)
+            .map(|(entry, exit)| (entry.max(near) + exit) / 2.0);
+        let s = through.unwrap_or_else(|| (b.center() - cam.target).dot(f));
+        if s.is_finite() && s > near {
+            app.cam.target = cam.target + f * s;
+            // The eye stays put; a parallel view's scale is its distance, which stays put instead.
+            if cam.fov > 0.0 {
+                app.cam.distance = (cam.distance + s).clamp(1e-3, 1e7);
+            }
+        }
+    }
+    app.viewport.orbit_pivot = Some(app.cam.target);
 }
 
 /// An orbit drag so far: the camera it began with, the pointer's total motion since, the pivot
