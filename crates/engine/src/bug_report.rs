@@ -357,6 +357,10 @@ pub fn set_status(dir: &Path, id: &str, state: Option<&str>, issue: Option<u64>,
     }
     if let Some(st) = state {
         v["status"]["state"] = json!(st);
+        // Open again: no commit fixes it any more.
+        if st == "open" {
+            v["status"]["commit"] = Value::Null;
+        }
     }
     if let Some(n) = issue {
         v["status"]["issue"] = json!(n);

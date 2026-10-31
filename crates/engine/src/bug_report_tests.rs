@@ -73,6 +73,9 @@ fn status_records_the_issue_and_the_fixing_commit_and_clear_takes_only_fixed_one
     assert_eq!(v["status"]["state"], "fixed");
     assert_eq!(v["status"]["issue"], 12);
     assert_eq!(v["status"]["commit"], "31535b79");
+    let reopened = set_status(&d, id, Some("open"), None, None).unwrap();
+    assert!(reopened["status"]["commit"].is_null() && reopened["status"]["issue"] == 12, "reopened: {}", reopened["status"]);
+    set_status(&d, id, Some("fixed"), None, Some("31535b79")).unwrap();
     // Paths are added when read, never saved into the report.
     let saved: Value = serde_json::from_slice(&fs::read(d.join(id).join("report.json")).unwrap()).unwrap();
     assert!(saved.get("path").is_none() && saved.get("design_path").is_none());

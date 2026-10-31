@@ -59,7 +59,9 @@ def fixing_commit(report: str, issue: int | None) -> str | None:
     verbs = "(Fix|Fixes|Fixed|Close|Closes|Closed|Resolve|Resolves|Resolved)"
     # Report ids are digits and dashes (checked by the CLI): nothing in them needs escaping.
     names = [f"report {report}"] + ([f"#{issue}([^0-9]|$)"] if issue else [])
-    out = run(["git", "-C", str(ROOT), "log", "-1", "--format=%h", "-E", f"--grep={verbs} ({'|'.join(names)})"])
+    # Only this fork's own commits: upstream's history says "Fixes #N" about its own issues,
+    # whose numbers mean other issues here.
+    out = run(["git", "-C", str(ROOT), "log", "-1", "--format=%h", "-E", f"--grep={verbs} ({'|'.join(names)})", "HEAD", "--not", "--remotes=upstream"])
     return out.strip() or None
 
 
