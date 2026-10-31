@@ -44,9 +44,9 @@ or `io::write_design_container_with_compression` from Rust.
 
 ## Bounds and recovery
 
-Input and individual expanded parts are capped at 256 MiB. Total declared expanded
-parts and resolved payloads are each capped at 512 MiB, including repeated references
-in the latter budget. There are at most 10,000 entries. Duplicate/ambiguous entry names,
+Input and individual expanded parts are capped at 256 MiB, except an embedded STEP
+source or mesh, which may expand to 512 MiB and is stored compressed. Total declared expanded parts and resolved payloads
+are each capped at 768 MiB, including repeated references in the latter budget. There are at most 10,000 entries. Duplicate/ambiguous entry names,
 path traversal, ZIP64 and multi-disk packages are refused. Entries are read in memory;
 no archive paths are extracted to the filesystem. Exact part lengths and ZIP CRCs are
 checked, along with blob hashes. Hashes detect correspondence and corruption, not trust.
@@ -164,9 +164,14 @@ miss. A build of unknown source (a tarball without git) never reads a cache.
 
 The fixed budgets of earlier caches (4,096 bodies, 100,000 faces, 64 MiB) scale
 with the design now: up to 200,000 body records, 100,000 distinct bodies, a 32 MiB
-manifest and a payload within the container's part budget (256 MiB), leaving room
-for the document. Individual bodies keep the codec's own limits. The archive-wide
-budgets (256 MiB per part, 512 MiB expanded, 10,000 entries) are unchanged.
+manifest and a payload of up to 512 MiB, stored in parts of at most 256 MiB each
+(`cache/bodies.bin`, then `cache/bodies.2.bin`), so a build that reads only the first
+part, or allows 256 MiB a part, takes it as a cache miss and still opens the design. The
+payload is always compressed (encoded bodies shrink about threefold or more), so it is
+measured by what it expands to, within the archive's expanded budget; a file that then comes out over 256 MiB is written
+again with the cache held to the file's room uncompressed, which keeps fewer states or
+leaves it out. A 1,500-body assembly's 400 MiB cache is 136 MB on disk. Individual
+bodies keep the codec's own limits.
 Decoding runs under `kernel::guard` and is linear in the payload's bytes.
 
 A model whose cache would push the container past them keeps fewer states

@@ -171,7 +171,7 @@ impl Encoded {
         let shares = parts.iter().map(|p| slice(*self.parts.get(*p).ok_or_else(|| invalid("display share"))?)).collect::<Result<Vec<_>>>()?;
         let stored = order.iter().map(|s| self.slices.get(*s).ok_or_else(|| invalid("cached body"))).collect::<Result<Vec<_>>>()?;
         let length = stored.iter().fold(0usize, |n, bytes| n.saturating_add(bytes.len()));
-        if length > MAX_DESIGN_BYTES || stored.len() > MAX_UNIQUE {
+        if length > super::MAX_CACHE_PART || stored.len() > MAX_UNIQUE {
             return Err(invalid("model cache size"));
         }
         let mut data = Vec::with_capacity(length);
@@ -228,7 +228,16 @@ pub(super) fn read_geometry_with<R: Read + Seek>(reader: &mut PackageReader<R>, 
     }
     // Validate the small parametric metadata before decoding any geometry.
     Document::from_json(std::str::from_utf8(document).map_err(invalid)?)?;
-    let data = reader.limited_part(PAYLOAD, MAX_DESIGN_BYTES)?;
+    // Its parts in order ([`payload_parts`]); the digest below checks they are the whole of it.
+    let mut data = reader.limited_part(PAYLOAD, super::MAX_PART)?;
+    for i in 2..=PAYLOAD_PARTS {
+        let name = format!("cache/bodies.{i}.bin");
+        if !reader.has_part(&name) {
+            break;
+        }
+        let more = reader.limited_part(&name, super::MAX_PART.min(super::MAX_CACHE_PART.saturating_sub(data.len())))?;
+        data.extend_from_slice(&more);
+    }
     if manifest.get("payload").and_then(Value::as_str) != Some(digest(&data).as_str()) {
         return Err(invalid("model cache payload key"));
     }
@@ -328,3 +337,24 @@ pub(super) fn geometry_preview(document: &[u8], model: &SavedModel) -> Result<De
 }
 
 pub(super) const ENTRIES: [&str; 2] = [MANIFEST, PAYLOAD];
+
+/// Parts the payload may take at most ([`payload_parts`]).
+pub(super) const PAYLOAD_PARTS: usize = super::MAX_CACHE_PART.div_ceil(super::MAX_PART);
+const _: () = assert!(PAYLOAD_PARTS * super::MAX_PART >= super::MAX_CACHE_PART, "the largest payload fits its parts");
+
+/// The payload in parts of at most an archive part's limit: the first under `cache/bodies.bin`,
+/// the rest numbered after it (`cache/bodies.2.bin`, …). In one part past that limit, an older
+/// build refused the whole design, not only its cache.
+pub(super) fn payload_parts(data: &[u8]) -> Vec<(String, &[u8])> {
+    parts_of(data, super::MAX_PART)
+}
+
+pub(super) fn parts_of(data: &[u8], limit: usize) -> Vec<(String, &[u8])> {
+    if data.is_empty() || limit == 0 {
+        return vec![(PAYLOAD.to_owned(), data)];
+    }
+    data.chunks(limit)
+        .enumerate()
+        .map(|(i, chunk)| (if i == 0 { PAYLOAD.to_owned() } else { format!("cache/bodies.{}.bin", i + 1) }, chunk))
+        .collect()
+}
