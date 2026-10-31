@@ -1,5 +1,6 @@
 //! Crash reports, for agents and people (see `crate::crash` and docs/crash-reports.md): list
-//! them, read one, delete them. They live on this computer and are never sent anywhere. And the
+//! them, read one, delete them. Bug reports the user writes (`crate::bug_report`). Both live on
+//! this computer and are never sent anywhere. And the
 //! profiler (`solidcraft_profile`, docs/perf.md): where the time goes, SMLib's calls to commands.
 
 use serde_json::Value;
@@ -45,6 +46,19 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CLEAR_CONTRACT)
         .output(output_schema_for::<CrashReportsCleared>)
         .params("id?: one report (default: all). Returns {deleted}"),
+    CommandSpec::new("diagnostics.bug_report", "Save Bug Report", crate::checked!("diagnostics.bug_report", bug_report))
+        .icon("bug_report")
+        .noundo()
+        .contract(&BUG_REPORT_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::diagnostics::BugReportReply>)
+        .params(
+            "title: text (what went wrong, one line); what_happened?: text; expected?: text; steps?: text; dialog?: the commands \
+             the open dialog would run; context?: text (selection, preferences, window, graphics); screenshot_png?: base64 PNG \
+             (16 MB at most). Saves a bug report on this computer, in reports/ beside the crash folder: what was written, the \
+             design as it is now, this run's commands as a replay, every feature's error and warning, this run's log and the \
+             screenshot. Nothing is sent anywhere. Returns {id, path, files, notes, reproduce}; `solidcraft-cli reports` lists, \
+             shows and replays them",
+        ),
     CommandSpec::new("diagnostics.profile", "Profile", crate::checked!("diagnostics.profile", profile))
         .icon("bug_report")
         .noundo()
@@ -142,6 +156,52 @@ fn crash_test(_: &mut Session, p: &Value) -> Result<Value> {
 const PROFILE_CONTRACT: crate::schema::TypedContract<crate::schema::diagnostics::ProfileParams> = crate::schema::TypedContract::new();
 
 const VALIDATION_CONTRACT: crate::schema::TypedContract<crate::schema::diagnostics::ValidationParams> = crate::schema::TypedContract::new();
+
+const BUG_REPORT_CONTRACT: crate::schema::TypedContract<crate::schema::diagnostics::BugReportParams> = crate::schema::TypedContract::new();
+
+fn bug_report(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "diagnostics.bug_report";
+    let text = |key: &str| match p.get(key) {
+        None | Some(Value::Null) => Ok(String::new()),
+        Some(Value::String(t)) => Ok(t.clone()),
+        Some(_) => Err(bad(cmd, format!("`{key}` must be text"))),
+    };
+    let title = text("title")?;
+    if title.trim().is_empty() {
+        return Err(bad(cmd, "`title` must say what went wrong"));
+    }
+    let screenshot_png = match text("screenshot_png")?.as_str() {
+        "" => None,
+        b64 if b64.len() > crate::bug_report::MAX_SCREENSHOT_BYTES / 3 * 4 + 4 => {
+            return Err(bad(cmd, format!("`screenshot_png` is larger than {} MB", crate::bug_report::MAX_SCREENSHOT_BYTES >> 20)));
+        }
+        b64 => Some(
+            solidcraft_doc::canvas::base64_decode(b64)
+                .filter(|b| b.starts_with(b"\x89PNG\r\n\x1a\n"))
+                .ok_or_else(|| bad(cmd, "`screenshot_png` must be a PNG in base64"))?,
+        ),
+    };
+    let request = crate::bug_report::Request {
+        title,
+        what_happened: text("what_happened")?,
+        expected: text("expected")?,
+        steps: text("steps")?,
+        dialog: p.get("dialog").filter(|d| !d.is_null()).cloned(),
+        context: text("context")?,
+        screenshot_png,
+    };
+    let dir = crate::bug_report::default_dir().ok_or_else(|| EngineError::Other(format!("{cmd}: no report folder on this system")))?;
+    let v = crate::bug_report::write(s, &dir, &request).map_err(|e| EngineError::Other(format!("{cmd}: {e}")))?;
+    let strings = |v: &Value| v.as_array().map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
+    let reply = crate::schema::diagnostics::BugReportReply {
+        id: v["id"].as_str().unwrap_or_default().to_string(),
+        path: v["path"].as_str().unwrap_or_default().to_string(),
+        files: v["files"].as_object().map(|f| f.keys().cloned().collect()).unwrap_or_default(),
+        notes: strings(&v["notes"]),
+        reproduce: v["reproduce"].as_str().map(str::to_string),
+    };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(format!("{cmd}: {e}")))
+}
 
 fn validation(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "diagnostics.validation";

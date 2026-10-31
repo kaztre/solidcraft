@@ -1008,6 +1008,37 @@ fn from_journal(j: JournalRead) -> Extra {
     }
 }
 
+/// This run's journal and app details for a bug report the user writes ([`crate::bug_report`]).
+pub(crate) struct ForReport {
+    /// The design the commands start from (autosave or saved file), when there is one.
+    pub design: Option<Vec<u8>>,
+    /// `{commands}` from that design (or a new one), when the journal has all of them.
+    pub replay: Option<Value>,
+    pub recent: Vec<Value>,
+    pub base: Value,
+    pub notes: Vec<String>,
+    pub build: Build,
+    pub environment: String,
+    /// When this run started (seconds since 1970).
+    pub started: u64,
+}
+
+/// `None` before [`install`] (tests, the CLI and the web build).
+pub(crate) fn for_report() -> Option<ForReport> {
+    let state = STATE.get()?;
+    let e = from_journal(read_live_journal(state));
+    Some(ForReport {
+        design: e.design,
+        replay: e.replay,
+        recent: e.recent,
+        base: e.base,
+        notes: e.notes,
+        build: state.build.clone(),
+        environment: state.environment.lock().map(|e| e.clone()).unwrap_or_default(),
+        started: state.started,
+    })
+}
+
 fn write_from_journal(state: &State, kind: &str, p: Option<&Panic>) -> Option<String> {
     let j = read_live_journal(state);
     let extra = from_journal(j);

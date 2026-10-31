@@ -1,0 +1,10 @@
+#!/bin/sh
+# Pushing to origin (the fork): file new local bug reports as issues there and mark the reports
+# whose issues are closed as fixed (scripts/sync-reports.py). Never stops the push.
+# Turn on with: git config core.hooksPath scripts/git-hooks
+[ "$1" = "origin" ] || exit 0
+root="$(git rev-parse --show-toplevel)" || exit 0
+py="$HOME/.local/bin/python3"
+[ -x "$py" ] || py=python3
+"$py" -I "$root/scripts/sync-reports.py" || echo "sync-reports: skipped (see above); the push goes on" >&2
+exit 0

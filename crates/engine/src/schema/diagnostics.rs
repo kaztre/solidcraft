@@ -348,6 +348,58 @@ pub struct ValidationReply {
     pub previous: ValidationMode,
 }
 
+/// Text or null, with the handler's message for anything else.
+fn text<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::String(s) => Ok(Some(s)),
+        _ => Err(serde::de::Error::custom("must be text")),
+    }
+}
+
+/// Save a bug report on this computer: what the user wrote, the design as it is now, this run's
+/// commands as a replay, every feature's error, this run's log and the screenshot.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct BugReportParams {
+    /// What went wrong, in one line.
+    #[serde(default, deserialize_with = "text")]
+    pub title: Option<String>,
+    /// What happened.
+    #[serde(default, deserialize_with = "text")]
+    pub what_happened: Option<String>,
+    /// What should have happened.
+    #[serde(default, deserialize_with = "text")]
+    pub expected: Option<String>,
+    /// The steps that lead to it.
+    #[serde(default, deserialize_with = "text")]
+    pub steps: Option<String>,
+    /// The commands the open dialog would run, when one was open (any JSON).
+    #[serde(default)]
+    pub dialog: Option<Value>,
+    /// What the front end knows: selection, preferences, window, graphics.
+    #[serde(default, deserialize_with = "text")]
+    pub context: Option<String>,
+    /// The screenshot: a PNG, base64-encoded, 16 MB at most.
+    #[serde(default, deserialize_with = "text")]
+    pub screenshot_png: Option<String>,
+}
+
+/// The reply of `diagnostics.bug_report`.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BugReportReply {
+    /// The report's id (`solidcraft-cli reports show <id>`).
+    pub id: String,
+    /// Its folder.
+    pub path: String,
+    /// The files it holds, by role: design, start, replay, log, screenshot.
+    pub files: Vec<String>,
+    /// What it could not include, and why.
+    pub notes: Vec<String>,
+    /// The command that replays it, when it can be replayed.
+    pub reproduce: Option<String>,
+}
+
 /// Tests that switch the process-wide profiler on, off or reset it run one at a time.
 #[cfg(test)]
 pub(crate) static PROFILE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
