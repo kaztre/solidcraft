@@ -34,6 +34,40 @@ reply carries its own profile while recording.
 
 # Design loading
 
+## Imported helical faces: refined to the point limit (2026-11-01)
+
+A 233 MB STEP assembly exported by another CAD system (1,193 solids placed as 3,928 bodies)
+drew 56.7 million triangles. `bench-open --heaviest N` lists the bodies with the most
+triangles and each one's densest faces. Forty bodies held 71 % of the triangles: a 10 mm part
+with 21 faces had 378,646, and its cylindrical faces each had about 66 boundary nodes and
+20,000 points inside. Sag refinement (`tess::sag::refine`) had added 20,000 points to each,
+which is `MAX_REFINE`. There were two causes:
+
+- **A helical edge's pcurve wrapped into one period.** The importer computes the pcurves of a
+  cylinder face bounded by helices point by point on the cylinder's closed-spline form, so the
+  nodes along an edge jumped a whole period at the seam. The loop crossed itself in (u, v), was
+  filled leniently, and its folded triangles gave splits whose middles fell on points already
+  there, over and over. Each edge's nodes now follow each other across the seam
+  (`tess::unwrap_along`). A split whose middle falls on an existing point is left alone.
+- **Edges that stand off their surface.** A spline edge within its tolerance of an analytic
+  face, not on it, left every side through a boundary node that far off the surface, however
+  short it was split. Sag is now measured from the surface at every node's parameters, which is
+  what splitting can reduce.
+
+`solidcraft-cli bench-open`, release build, Apple M5 (10 cores), one run each:
+
+| | before | after |
+|---|---:|---:|
+| the assembly: triangles | 56,658,370 | 16,864,273 |
+| the assembly: mesh phase | 24.5 s | 10.7 s |
+| the assembly: `kernel mesh` CPU | 184 s | 89 s |
+| a 10 mm, 21-face part | 378,646 tris, 173 ms | 6,950 tris, 11 ms |
+| an 83 mm, 385-face part | 6,712,490 tris | 59,267 tris |
+| a helical band, edges 0.013 mm off the cylinder (`a_face_whose_edges_stand_off_its_surface_is_not_refined_along_them`) | 40,272 tris | 272 tris |
+
+Bodies whose faces were not refined to the limit mesh as before: the band with its edges on the
+cylinder (256 triangles), an M3 modelled thread (7,878), and the tessellation tests.
+
 ## Edges made by booleans: each point evaluated once (2026-10-16)
 
 A boolean meshes both operands with truck-meshalgo, which first divides every edge into a

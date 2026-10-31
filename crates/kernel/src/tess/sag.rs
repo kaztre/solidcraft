@@ -7,7 +7,7 @@
 //! conforming. Sides on the face's boundary are never split: they are the edges' own nodes,
 //! which the neighbouring face shares.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use solidcraft_geom::Vec3;
 use solidcraft_geom::tess::EvalSurface;
@@ -32,6 +32,12 @@ pub(crate) fn refine(s: &EvalSurface, tol: f64, reach: f64, fixed: &[Vec3], uv: 
         None => at(q).dist(c),
     };
     let mut pos: Vec<Vec3> = uv.iter().enumerate().map(|(i, q)| fixed.get(i).copied().unwrap_or_else(|| at(*q))).collect();
+    // The surface at every point's parameters, a boundary node's too: the sag measured from these
+    // is what splitting can take away. A node its edge holds off the surface (an edge within its
+    // tolerance of the face, not on it) leaves every side through it that far off however short
+    // it is split: measured from the node itself, the sides round it were split down to the
+    // shortest, thousands of points along the boundary of a face a few hundred describe.
+    let mut on: Vec<Vec3> = uv.iter().map(|q| at(*q)).collect();
     // No side is split below this length: a surface whose parameters bend sharply (at a pole) is
     // not chased to the last bit.
     let shortest = tol * 1e-3;
@@ -42,6 +48,17 @@ pub(crate) fn refine(s: &EvalSurface, tol: f64, reach: f64, fixed: &[Vec3], uv: 
         }
     }
     let mut sag_of: HashMap<(u32, u32), f64> = HashMap::new();
+    // Where the points are, by cells of `shortest`: a split whose middle falls on a point already
+    // there makes nothing shorter. A triangulation folded over itself in (u, v) (a face across a
+    // closed spline's seam) gave such splits again and again, each a copy of a point it had, until
+    // the point limit: 20,000 points on a face a few hundred describe. Such a side is left as it is.
+    let cell = |p: Vec3| [p.x, p.y, p.z].map(|c| (c / shortest).floor() as i64);
+    let mut taken: HashSet<[i64; 3]> = pos.iter().map(|p| cell(*p)).collect();
+    let near_taken = |taken: &HashSet<[i64; 3]>, p: Vec3| {
+        let c = cell(p);
+        (-1..=1).any(|i| (-1..=1).any(|j| (-1..=1).any(|k| taken.contains(&[c[0] + i, c[1] + j, c[2] + k]))))
+    };
+    let mut stuck: HashSet<(u32, u32)> = HashSet::new();
     let limit = uv.len().saturating_add(max_points);
     let mut queue: Vec<u32> = (0..tris.len() as u32).rev().collect();
     while let Some(ti) = queue.pop() {
@@ -51,7 +68,8 @@ pub(crate) fn refine(s: &EvalSurface, tol: f64, reach: f64, fixed: &[Vec3], uv: 
         let Some(&t) = tris.get(ti as usize) else { continue };
         let p = |i: u32| pos.get(i as usize).copied();
         let q = |i: u32| uv.get(i as usize).copied();
-        let (Some(pa), Some(pb), Some(pc), Some(qa), Some(qb), Some(qc)) = (p(t[0]), p(t[1]), p(t[2]), q(t[0]), q(t[1]), q(t[2])) else {
+        let o = |i: u32| on.get(i as usize).copied();
+        let (Some(pa), Some(pb), Some(pc), Some(qa), Some(qb), Some(qc)) = (o(t[0]), o(t[1]), o(t[2]), q(t[0]), q(t[1]), q(t[2])) else {
             continue;
         };
         // Sides inside the face (two triangles on them), long enough to split, with their sag.
@@ -59,15 +77,15 @@ pub(crate) fn refine(s: &EvalSurface, tol: f64, reach: f64, fixed: &[Vec3], uv: 
         for k in 0..3 {
             let (a, b) = (t[k], t[(k + 1) % 3]);
             let e = key(a, b);
-            if sides.get(&e).is_none_or(|ts| ts.len() != 2) {
+            if sides.get(&e).is_none_or(|ts| ts.len() != 2) || stuck.contains(&e) {
                 continue;
             }
-            let (Some(xa), Some(xb), Some(ua), Some(ub)) = (p(a), p(b), q(a), q(b)) else { continue };
+            let (Some(xa), Some(xb), Some(ya), Some(yb), Some(ua), Some(ub)) = (p(a), p(b), o(a), o(b), q(a), q(b)) else { continue };
             let len = xa.dist(xb);
             if len <= shortest {
                 continue;
             }
-            let sag = *sag_of.entry(e).or_insert_with(|| off(mean(&[ua, ub]), (xa + xb) * 0.5));
+            let sag = *sag_of.entry(e).or_insert_with(|| off(mean(&[ua, ub]), (ya + yb) * 0.5));
             inner.push((sag, len, e));
         }
         // The surface's departure from a flat triangle is about quadratic over it: at the
@@ -97,15 +115,22 @@ pub(crate) fn refine(s: &EvalSurface, tol: f64, reach: f64, fixed: &[Vec3], uv: 
                 _ => break,
             }
         }
+        let (Some(ua), Some(ub)) = (q(split.0), q(split.1)) else { continue };
+        let m = mean(&[ua, ub]);
+        let pm = at(m);
+        if near_taken(&taken, pm) {
+            stuck.insert(split);
+            continue;
+        }
         // The triangle is looked at again when the split was another's, on its way.
         if from != ti {
             queue.push(ti);
         }
-        let (Some(ua), Some(ub)) = (q(split.0), q(split.1)) else { continue };
-        let m = mean(&[ua, ub]);
+        taken.insert(cell(pm));
         let mi = uv.len() as u32;
         uv.push(m);
-        pos.push(at(m));
+        pos.push(pm);
+        on.push(pm);
         sag_of.remove(&split);
         queue.extend(split_side(tris, &mut sides, split, mi));
     }
