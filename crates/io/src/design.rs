@@ -30,6 +30,12 @@ const STEP_LEVEL: i64 = 2;
 /// stored Deflate-compressed, so a compressible large import can be saved (#6600). The file
 /// itself stays within [`MAX_DESIGN_BYTES`].
 const MAX_MESH_PART: usize = crate::MAX_STEP_BYTES;
+/// The model cache's bodies may expand to as much as a STEP source, in parts of at most
+/// [`MAX_PART`] each (`native_cache::payload_parts`): they are always stored Deflate-compressed
+/// (about threefold or more), and only a cache whose file fits is kept. A 1,500-body assembly's
+/// cache is 400 MB, which held to 256 MiB was never saved, so every open rebuilt it from the
+/// STEP (a minute).
+const MAX_CACHE_PART: usize = crate::MAX_STEP_BYTES;
 /// Every other part is bounded by the file size limit.
 const MAX_PART: usize = MAX_DESIGN_BYTES;
 const MAX_EXPANDED: usize = MAX_STEP_PART + MAX_DESIGN_BYTES;
@@ -111,6 +117,14 @@ impl PackageWriter {
     /// the file within `budget` and its expanded size within the reader's budget?
     fn room(&self, entries: usize, extra: usize, budget: usize) -> bool {
         self.names.len().saturating_add(entries) <= MAX_ENTRIES && extra <= self.space(entries, budget)
+    }
+    /// The bytes `entries` more parts may expand to together within the reader's budget, whatever
+    /// they compress to: for a part always compressed, whose file is measured once it is written.
+    fn expanded_space(&self, entries: usize) -> usize {
+        if self.names.len().saturating_add(entries) > MAX_ENTRIES {
+            return 0;
+        }
+        MAX_EXPANDED.saturating_sub(self.expanded).min(MAX_CACHE_PART)
     }
     /// The bytes `entries` more optional parts may hold together ([`PackageWriter::room`]).
     fn space(&self, entries: usize, budget: usize) -> usize {
@@ -236,7 +250,9 @@ pub fn write_design_container_with_thumbnail(
 }
 
 /// [`write_design_container_with_thumbnail`] within `budget` bytes for the optional caches (the
-/// container's budget; tests pass less).
+/// container's budget; tests pass less). The model cache is measured by what it expands to, as
+/// it is compressed; a file that comes out over `budget` is written again with the cache held to
+/// the file's room uncompressed, which thins it or leaves it out.
 fn write_container(
     doc: &Document,
     compression: DesignCompression,
@@ -244,6 +260,29 @@ fn write_container(
     geometry: Option<&solidcraft_doc::SavedModel>,
     thumbnail: Option<&[u8]>,
     budget: usize,
+) -> Result<Vec<u8>> {
+    match write_container_held(doc, compression, preview, geometry, thumbnail, budget, false) {
+        Ok(bytes) if bytes.len() <= budget => Ok(bytes),
+        first if geometry.is_some() => {
+            match &first {
+                Ok(bytes) => log::info!("the design with its model cache is {} MB, over {} MB: written again", bytes.len() >> 20, budget >> 20),
+                Err(e) => log::info!("the design with its model cache could not be written ({e}): written again"),
+            }
+            write_container_held(doc, compression, preview, geometry, thumbnail, budget, true)
+        }
+        other => other,
+    }
+}
+
+/// One try of [`write_container`]: `held`, the model cache held to the file's room uncompressed.
+fn write_container_held(
+    doc: &Document,
+    compression: DesignCompression,
+    preview: Option<&DesignPreview>,
+    geometry: Option<&solidcraft_doc::SavedModel>,
+    thumbnail: Option<&[u8]>,
+    budget: usize,
+    held: bool,
 ) -> Result<Vec<u8>> {
     doc.render.validate().map_err(invalid)?;
     let mut writer = PackageWriter { zip: zip::ZipWriter::new(Cursor::new(Vec::new())), names: BTreeSet::new(), expanded: 0, resolved: 0 };
@@ -310,13 +349,16 @@ fn write_container(
     writer.part("container.json", &serde_json::to_vec(&json!({"format": VERSION})).map_err(invalid)?, false)?;
     // The model cache is optional: one that does not fit the container keeps fewer states, or is
     // left out, never a failed save.
-    let cache = geometry.and_then(|g| native_cache::encode_model(g, &metadata, writer.space(2, budget)).ok());
+    let parts = 1 + native_cache::PAYLOAD_PARTS;
+    let room = if held { writer.space(parts, budget) } else { writer.expanded_space(parts) };
+    let cache = geometry.and_then(|g| native_cache::encode_model(g, &metadata, room).ok());
     if let Some((manifest, data)) = cache {
-        let [manifest_entry, payload_entry] = native_cache::ENTRIES;
-        // Deflated whatever the policy: the encoded bodies shrink about fourfold to tenfold, faster
+        // Deflated whatever the policy: the encoded bodies shrink about threefold or more, faster
         // than the extra bytes would be written and read.
-        writer.part(manifest_entry, &manifest, true)?;
-        writer.part(payload_entry, &data, true)?;
+        writer.part(native_cache::ENTRIES[0], &manifest, true)?;
+        for (name, chunk) in native_cache::payload_parts(&data) {
+            writer.part(&name, chunk, true)?;
+        }
     }
     if let Some((manifest, data)) = preview.and_then(|p| encode_preview(p, &metadata).ok())
         && writer.room(2, manifest.len().saturating_add(data.len()), budget)
@@ -466,6 +508,9 @@ impl<R: Read + Seek> PackageReader<R> {
     }
     fn part(&mut self, name: &str) -> Result<Vec<u8>> {
         self.limited_part(name, part_limit(name))
+    }
+    fn has_part(&mut self, name: &str) -> bool {
+        self.zip.by_name(name).is_ok()
     }
     fn limited_part(&mut self, name: &str, limit: usize) -> Result<Vec<u8>> {
         let part = self.zip.by_name(name).map_err(|e| invalid(format!("required part `{name}`: {e}")))?;
@@ -1049,17 +1094,38 @@ mod tests {
     }
 
     /// A model cache that does not fit the design file is left out: the save succeeds, and the
-    /// design reads back as saved.
+    /// design reads back as saved. One that fits only compressed is kept: it was measured
+    /// uncompressed, so a 1,500-body assembly's 400 MB cache, 60 MB on disk, was never saved.
     #[test]
     fn a_model_cache_too_big_for_the_file_is_left_out_not_a_failed_save() {
         let doc = document();
-        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, 70_000).unwrap();
+        let geometry = native_geometry();
+        let encoded = native_cache::encode_model(&geometry, b"{}", usize::MAX).map(|(m, d)| m.len() + d.len()).unwrap();
+        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&geometry), None, encoded).unwrap();
+        assert!(bytes.len() < encoded && parts(&bytes).contains_key("cache/bodies.bin"), "{} bytes, {encoded} uncompressed", bytes.len());
+        assert!(read_design_geometry(&bytes).is_some());
+        let plain = write_container(&doc, DesignCompression::Fast, None, None, None, MAX_DESIGN_BYTES).unwrap().len();
+        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&geometry), None, plain + 64).unwrap();
         assert!(!parts(&bytes).contains_key("cache/model.json") && !parts(&bytes).contains_key("cache/bodies.bin"));
         assert!(read_design_geometry(&bytes).is_none());
         assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
         // With room for it, the same model is kept.
         let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, MAX_DESIGN_BYTES).unwrap();
         assert!(read_design_geometry(&bytes).is_some());
+    }
+
+    /// The cache's bodies are stored in parts within an archive part's limit, numbered after the
+    /// first: one 400 MB part made a build that allows 256 MiB a part refuse the whole design,
+    /// where its cache should only have been a miss.
+    #[test]
+    fn a_cache_payload_is_stored_in_parts_within_the_part_limit() {
+        let data: Vec<u8> = (0..10u8).collect();
+        let parts = native_cache::parts_of(&data, 4);
+        let names: Vec<&str> = parts.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["cache/bodies.bin", "cache/bodies.2.bin", "cache/bodies.3.bin"]);
+        assert_eq!(parts.iter().map(|(_, c)| c.len()).collect::<Vec<_>>(), [4, 4, 2]);
+        assert_eq!(parts.iter().flat_map(|(_, c)| c.iter().copied()).collect::<Vec<_>>(), data);
+        assert_eq!(native_cache::parts_of(&[], 4).len(), 1);
     }
 
     /// A saved model of four features (5, 50, 20 and 1 ms) whose states each hold the eight
