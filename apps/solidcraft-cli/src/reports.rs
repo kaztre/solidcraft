@@ -160,14 +160,12 @@ pub fn issue_text(report: &Value) -> (String, String) {
         Value::Null => String::new(),
         d => format!("```json\n{}\n```", scrub(&super::pretty(d))),
     };
-    let warnings: Vec<String> = report["log_path"]
-        .as_str()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .map(|log| {
-            let w: Vec<&str> = log.lines().filter(|l| l.contains(" warn ") || l.contains(" error ")).collect();
-            w[w.len().saturating_sub(20)..].iter().map(|l| scrub(l)).collect()
-        })
-        .unwrap_or_default();
+    let log = report["log_path"].as_str().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+    let (warnings, left_out) = log_warnings(&log, 20);
+    let mut warnings: Vec<String> = warnings.iter().map(|l| scrub(l)).collect();
+    if left_out > 0 {
+        warnings.push(format!("({left_out} line(s) naming files left out)"));
+    }
     let app = &report["app"];
     let system = &report["system"];
     let mut body = String::new();
@@ -199,6 +197,28 @@ pub fn issue_text(report: &Value) -> (String, String) {
     (if title.is_empty() { format!("Bug report {id}") } else { title }, body)
 }
 
+/// The last `n` warning and error lines of a log, without the ones that name a file or folder: a
+/// path's folder and file names can be private (a client, a project), however the home folder is
+/// written. Also says how many such lines it left out.
+fn log_warnings(log: &str, n: usize) -> (Vec<&str>, usize) {
+    let all: Vec<&str> = log.lines().filter(|l| l.contains(" warn ") || l.contains(" error ")).collect();
+    let (named, kept): (Vec<&str>, Vec<&str>) = all.into_iter().partition(|l| names_a_path(l));
+    (kept[kept.len().saturating_sub(n)..].to_vec(), named.len())
+}
+
+/// Whether a line names a file or folder: `~/…`, an absolute path (`/a/b`), a Windows drive or
+/// share (`C:\`, `\\server`), or a file name with a design or exchange extension.
+fn names_a_path(line: &str) -> bool {
+    const EXTENSIONS: &[&str] =
+        &[".sc", ".solidcraft", ".step", ".stp", ".iges", ".igs", ".stl", ".3mf", ".obj", ".gltf", ".glb", ".dxf", ".fcstd", ".3dm"];
+    let lower = line.to_ascii_lowercase();
+    line.contains("~/")
+        || line.contains(":\\")
+        || line.contains("\\\\")
+        || line.split_whitespace().any(|w| w.starts_with('/') && w.get(1..).is_some_and(|r| r.contains('/')))
+        || EXTENSIONS.iter().any(|x| lower.contains(&format!("{x}:")) || lower.contains(&format!("{x} ")) || lower.ends_with(x))
+}
+
 /// Takes the home folder and the user name out of text that leaves this computer.
 fn scrubber() -> impl Fn(&str) -> String {
     let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).ok().filter(|h| h.len() > 1);
@@ -212,5 +232,30 @@ fn scrubber() -> impl Fn(&str) -> String {
             t = t.replace(u.as_str(), "<user>");
         }
         t
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn log_lines_naming_files_never_reach_an_issue() {
+        let log = "\
+2026-10-31T07:52:21.619Z warn solidcraft_engine: doc.open failed after 0 ms: ~/Downloads/Client X/Secret Project/part.step: No such file
+2026-10-31T07:52:22.000Z warn solidcraft_engine: file.export failed: /Volumes/Work/Acme Rocket/nozzle.stl: denied
+2026-10-31T07:52:23.000Z error solidcraft_engine: C:\\Users\\me\\bracket.sc: locked
+2026-10-31T07:52:24.000Z warn solidcraft_engine: could not read Pump Housing.3mf: bad zip
+2026-10-31T07:52:25.000Z info solidcraft_engine: solid.box (1 ms)
+2026-10-31T07:52:36.861Z warn smlib: smlib_history_read(brep@0xcb98a9da0, cap=0) -> -1001 (0.024 ms)
+2026-10-31T07:52:47.787Z warn solidcraft_engine: solid.thread failed after 102 ms: this 8 mm hole is too narrow for a modelled M10 thread
+";
+        let (kept, left_out) = log_warnings(log, 20);
+        assert_eq!(left_out, 4);
+        assert_eq!(kept.len(), 2, "{kept:?}");
+        assert!(kept.iter().all(|l| !l.contains("Client") && !l.contains("Acme") && !l.contains("bracket") && !l.contains("Pump")));
+        assert!(kept[1].contains("too narrow for a modelled M10 thread"));
+        let (last, _) = log_warnings(log, 1);
+        assert_eq!(last, [kept[1]]);
     }
 }
