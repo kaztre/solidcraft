@@ -279,7 +279,12 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
         Ok((a, b))
     };
     let flip = usize::from(ask.flip);
-    let from_side = |ends: &mut FaceEnds| start_side(ends, ask.from.map(along), along(p)).map(|s| s ^ flip);
+    let from_side = |ends: &mut FaceEnds| start_side(ends, ask.from.map(along), along(p))?.map(|s| s ^ flip).ok_or_else(|| ends_alike(ends));
+    // A thread along the whole face starts where a shorter one would (so a length, a runout or a
+    // chamfer at the start all agree on its end, and `flip` turns them all), but where that
+    // would be refused (or the ends cannot be told apart) it starts at the face's start, as it
+    // always did, rather than ask.
+    let full_side = |ends: &mut FaceEnds| start_side(ends, ask.from.map(along), along(p)).ok().flatten().unwrap_or(0) ^ flip;
     // An external taper thread runs its standard length (ISO 7-1's useful thread, NPT's
     // effective thread L2) unless told otherwise; an internal one the face, as a tapped hole.
     let extent = match (ask.extent, form.is_taper() && !cyl.internal) {
@@ -287,14 +292,14 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
         (e, _) => e,
     };
     let (a, b, side) = match extent {
-        Extent::Full => (lo, hi, ask.from.map(|q| usize::from((along(q) - lo).abs() > (hi - along(q)).abs())).unwrap_or(0) ^ flip),
+        Extent::Full => (lo, hi, full_side(&mut ends)),
         Extent::Length(l) => {
             if !(l > 0.0) {
                 return Err(DocError::Invalid("thread length must be positive".into()));
             }
             if l >= hi - lo - pitch * 1e-3 {
-                // As long as the face (or longer): it runs the whole face from either end.
-                (lo, hi, ask.from.map(|q| usize::from((along(q) - lo).abs() > (hi - along(q)).abs())).unwrap_or(0) ^ flip)
+                // As long as the face (or longer): it runs the whole face, as a full thread.
+                (lo, hi, full_side(&mut ends))
             } else {
                 let side = from_side(&mut ends)?;
                 let (a, b) = span(side, if side == 0 { lo + l } else { hi - l })?;
@@ -365,33 +370,42 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
     Ok(ThreadOn { info, cyl, ends, steep: ask.steep, ease, from: side })
 }
 
-/// The end of the face (0: its start, 1: its end) a thread of limited length starts at: the end
-/// nearest `from` (an axial position) when given, else the face's only free end, else the end the
-/// pick `at` lies near (within a third of the face). A pick in the middle of a face whose ends are
-/// alike is refused rather than guessed.
-fn start_side(ends: &mut FaceEnds, from: Option<f64>, at: f64) -> Result<usize> {
+/// The end of the face (0: its start, 1: its end) a thread starts at: the end nearest `from` (an
+/// axial position) when given, else the face's only free end, else the end the pick `at` lies near
+/// (within a third of the face). `None` for a pick in the middle of a face whose ends are alike,
+/// which a thread of limited length refuses ([`ends_alike`]) rather than guess.
+fn start_side(ends: &mut FaceEnds, from: Option<f64>, at: f64) -> Result<Option<usize>> {
     let (lo, hi) = (ends.cyl.start, ends.cyl.end);
     if let Some(s) = from {
         return match (s - lo).abs().total_cmp(&(hi - s).abs()) {
-            std::cmp::Ordering::Less => Ok(0),
-            std::cmp::Ordering::Greater => Ok(1),
+            std::cmp::Ordering::Less => Ok(Some(0)),
+            std::cmp::Ordering::Greater => Ok(Some(1)),
             std::cmp::Ordering::Equal => Err(DocError::Invalid("`from` is as near one end of the face as the other".into())),
         };
     }
     match (ends.free(0)?, ends.free(1)?) {
-        (true, false) => return Ok(0),
-        (false, true) => return Ok(1),
+        (true, false) => return Ok(Some(0)),
+        (false, true) => return Ok(Some(1)),
         _ => {}
     }
     let third = (hi - lo) / 3.0;
-    if at - lo < third {
-        Ok(0)
+    Ok(if at - lo < third {
+        Some(0)
     } else if hi - at < third {
-        Ok(1)
+        Some(1)
     } else {
-        let alike = if ends.free(0)? { "both ends of the face are free" } else { "material goes on past both ends of the face" };
-        Err(DocError::Invalid(format!("{alike}: say which end the thread starts from (`from`, a point near that end)")))
-    }
+        None
+    })
+}
+
+/// Why [`start_side`] could not choose: the face's two ends are alike.
+fn ends_alike(ends: &mut FaceEnds) -> DocError {
+    let alike = match ends.free(0) {
+        Ok(true) => "both ends of the face are free",
+        Ok(false) => "material goes on past both ends of the face",
+        Err(e) => return e,
+    };
+    DocError::Invalid(format!("{alike}: say which end the thread starts from (`from`, a point near that end)"))
 }
 
 /// A thread's groove as a screw sweep: its `section` in `plane` (an axial plane through `base`),

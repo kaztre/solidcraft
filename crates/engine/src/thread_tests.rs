@@ -477,6 +477,46 @@ fn flip_starts_the_thread_from_the_other_end() {
     assert_ne!(top, bottom);
 }
 
+/// A full thread starts where a shorter one does: here at the shaft's top, the face's only free
+/// end, above its collar. A chamfer at the start, a length and `flip` all agree on that end:
+/// unflipped, the start chamfers the top and a 6 mm thread runs down from it; flipped, both
+/// start at the collar, which takes no chamfer, and the 6 mm runs up from it. A full thread
+/// started at the face's start (the collar) whatever its ends, so its chamfer needed `flip` and
+/// the same `flip` sent a length to the other end.
+#[test]
+fn a_full_thread_starts_where_a_shorter_one_does() {
+    let thread = |extra: Value| {
+        let mut s = shaft_on_collar();
+        let mut p = json!({"face": [5, 0, 25], "designation": "M10", "modeled": true});
+        if let (Some(p), Value::Object(e)) = (p.as_object_mut(), extra) {
+            p.extend(e);
+        }
+        s.execute("solid.thread", &p).map_err(|e| e.to_string())
+    };
+    let span = |made: Value| {
+        let t = &made["thread"];
+        let z = |at: &str| t["axis_point"][2].as_f64().unwrap() + t["axis"][2].as_f64().unwrap() * t[at].as_f64().unwrap();
+        let (a, b) = (z("start"), z("end"));
+        (a.min(b), a.max(b))
+    };
+    for flip in [false, true] {
+        for extent in [json!({}), json!({"length": 6})] {
+            let mut p = json!({"tip": "start", "flip": flip});
+            if let (Some(p), Value::Object(e)) = (p.as_object_mut(), extent.clone()) {
+                p.extend(e);
+            }
+            match thread(p) {
+                Ok(_) => assert!(!flip, "{extent}: flipped, the start is the collar end"),
+                Err(e) => assert!(flip && e.contains("not a free end"), "flip={flip} {extent}: {e}"),
+            }
+        }
+        // A modelled thread's reply leaves out its span; a cosmetic one's starts the same way.
+        let (z0, z1) = span(thread(json!({"length": 6, "flip": flip, "modeled": false})).unwrap());
+        let want = if flip { (10.0, 16.0) } else { (29.0, 35.0) };
+        assert!((z0 - want.0).abs() < 1e-6 && (z1 - want.1).abs() < 1e-6, "flip={flip}: {z0}..{z1}");
+    }
+}
+
 /// A print clearance cuts every wall of the groove that much further into the material: an
 /// internal thread's hole is made the tap drill plus twice the clearance (with `fit_hole`), and
 /// each groove takes more, inside a nut and on a shaft alike. A cosmetic thread has no walls to
