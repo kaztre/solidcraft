@@ -1000,6 +1000,115 @@ fn sag_refinement_across_an_inflection_ends_without_slivers() {
     }
 }
 
+/// One turn of a helical band on a cylinder of radius 1.5 (pitch 2, 0.8 wide, from 45 degrees),
+/// as a STEP sheet: each helical edge a cubic through `n` points of the helix per turn, so with
+/// few it stands off the cylinder by about r (1 - cos(pi / n)), as an exporter's spline edges do.
+fn helix_band_step(n: usize) -> String {
+    let (r, pitch, width, a0) = (1.5, 2.0, 0.8, std::f64::consts::FRAC_PI_4);
+    let mut ents: Vec<String> = Vec::new();
+    let mut add = |s: String| {
+        ents.push(s);
+        ents.len()
+    };
+    let helix = |add: &mut dyn FnMut(String) -> usize, z0: f64, sign: f64| {
+        let pts: Vec<usize> = (0..=n)
+            .map(|i| {
+                let a = a0 + sign * std::f64::consts::TAU * i as f64 / n as f64;
+                add(format!("CARTESIAN_POINT('',({:.12},{:.12},{:.12}))", r * a.cos(), r * a.sin(), z0 + sign * pitch * i as f64 / n as f64))
+            })
+            .collect();
+        let refs: Vec<String> = pts.iter().map(|p| format!("#{p}")).collect();
+        let mults: Vec<&str> = std::iter::once("4").chain(std::iter::repeat_n("1", n - 3)).chain(std::iter::once("4")).collect();
+        let knots: Vec<String> = (0..n - 1).map(|i| format!("{i}.")).collect();
+        let curve = add(format!(
+            "B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.F.,.F.,({}),({}),.UNSPECIFIED.)",
+            refs.join(","),
+            mults.join(","),
+            knots.join(",")
+        ));
+        (pts[0], pts[n], curve)
+    };
+    let (lo0, lo1, c_lo) = helix(&mut add, 0.0, 1.0);
+    let (hi0, hi1, c_hi) = helix(&mut add, pitch + width, -1.0);
+    let line = |add: &mut dyn FnMut(String) -> usize, p: usize| {
+        let d = add("DIRECTION('',(0.,0.,1.))".into());
+        let v = add(format!("VECTOR('',#{d},1.)"));
+        add(format!("LINE('',#{p},#{v})"))
+    };
+    let (up, down) = (line(&mut add, lo1), line(&mut add, lo0));
+    let [v0, v1, v2, v3] = [lo0, lo1, hi0, hi1].map(|p| add(format!("VERTEX_POINT('',#{p})")));
+    let e_lo = add(format!("EDGE_CURVE('',#{v0},#{v1},#{c_lo},.T.)"));
+    let e_up = add(format!("EDGE_CURVE('',#{v1},#{v2},#{up},.T.)"));
+    let e_hi = add(format!("EDGE_CURVE('',#{v2},#{v3},#{c_hi},.T.)"));
+    let e_dn = add(format!("EDGE_CURVE('',#{v0},#{v3},#{down},.T.)"));
+    let oes: Vec<String> = [(e_lo, 'T'), (e_up, 'T'), (e_hi, 'T'), (e_dn, 'F')]
+        .iter()
+        .map(|(e, s)| format!("#{}", add(format!("ORIENTED_EDGE('',*,*,#{e},.{s}.)"))))
+        .collect();
+    let lp = add(format!("EDGE_LOOP('',({}))", oes.join(",")));
+    let bound = add(format!("FACE_OUTER_BOUND('',#{lp},.T.)"));
+    let (o, z, x) = (add("CARTESIAN_POINT('',(0.,0.,-1.))".into()), add("DIRECTION('',(0.,0.,1.))".into()), add("DIRECTION('',(1.,0.,0.))".into()));
+    let ax = add(format!("AXIS2_PLACEMENT_3D('',#{o},#{z},#{x})"));
+    let cyl = add(format!("CYLINDRICAL_SURFACE('',#{ax},{r})"));
+    let face = add(format!("ADVANCED_FACE('',(#{bound}),#{cyl},.T.)"));
+    let shell = add(format!("OPEN_SHELL('',(#{face}))"));
+    let model = add(format!("SHELL_BASED_SURFACE_MODEL('',(#{shell}))"));
+    // The representation next, then its context.
+    let ctx = model + 2;
+    add(format!("MANIFOLD_SURFACE_SHAPE_REPRESENTATION('band',(#{model}),#{ctx})"));
+    let (unc, mm, rad, sr) = (ctx + 1, ctx + 2, ctx + 3, ctx + 4);
+    add(format!(
+        "(GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#{unc})) GLOBAL_UNIT_ASSIGNED_CONTEXT((#{mm},#{rad},#{sr})) REPRESENTATION_CONTEXT('',''))"
+    ));
+    add(format!("UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-06),#{mm},'','')"));
+    add("(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.))".into());
+    add("(NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.))".into());
+    add("(NAMED_UNIT(*) SI_UNIT($,.STERADIAN.) SOLID_ANGLE_UNIT())".into());
+    let data: Vec<String> = ents.iter().enumerate().map(|(i, e)| format!("#{}={e};", i + 1)).collect();
+    format!(
+        "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME('band.step','',(''),(''),'','','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN'));\nENDSEC;\nDATA;\n{}\nENDSEC;\nEND-ISO-10303-21;\n",
+        data.join("\n")
+    )
+}
+
+/// A face whose edges stand off its surface (within their tolerance, as an exporter's spline
+/// edges do on an analytic surface) left every side through a boundary node that far off its
+/// surface however short it was split: sag refinement split the sides along the boundary down to
+/// its shortest, 40,000 triangles for a helical band a few hundred describe (a part of a
+/// thousand such faces drew 56 million triangles). Measured from the surface at the nodes'
+/// parameters, the band is refined as the surface needs, as it is with edges on the surface.
+#[test]
+fn a_face_whose_edges_stand_off_its_surface_is_not_refined_along_them() {
+    let mesh = |n: usize| {
+        let imp = ok(crate::step_import(&helix_band_step(n)));
+        let body = &imp.bodies.first().unwrap_or_else(|| panic!("no body: {:?}", imp.warnings)).body;
+        let (m, stats) = plan_body(body, 0.004);
+        assert!(stats.lenient.is_empty() && stats.unmeshed.is_empty(), "{n} points a turn: {stats:?}");
+        m.triangles.len()
+    };
+    // 360 points a turn: the edges lie on the cylinder (within 1e-4 mm); 24: 0.013 mm off it.
+    let (on, off) = (mesh(360), mesh(24));
+    assert!(off <= on * 3 / 2, "edges off the surface: {off} triangles, on it: {on}");
+}
+
+/// The nodes of a helical edge on a closed surface, as an importer's pcurve gives them, wrapped
+/// into one period: followed across the seam, they step on as the edge does. A node at a pole
+/// keeps its parameter there.
+#[test]
+fn an_edge_wrapped_into_one_period_is_followed_across_the_seam() {
+    let mut eq = [[0.5, 0.48], [0.26, 0.45], [0.1155, 0.44], [3.9999, 0.42], [3.86, 0.41], [3.74, 0.39]];
+    unwrap_along(&mut eq, [Some(4.0), None], |_, _| false);
+    let u: Vec<f64> = eq.iter().map(|q| q[0]).collect();
+    for (got, want) in u.iter().zip([0.5, 0.26, 0.1155, -0.0001, -0.14, -0.26]) {
+        assert!((got - want).abs() < 1e-9, "{u:?}");
+    }
+    assert!(eq.iter().zip([0.48, 0.45, 0.44, 0.42, 0.41, 0.39]).all(|(q, v)| q[1] == v), "v is not periodic: {eq:?}");
+    // The middle node at a pole along u: it and the step after it are left as they are.
+    let mut eq = [[0.2, 0.0], [3.9, 0.5], [3.8, 1.0]];
+    unwrap_along(&mut eq, [Some(4.0), None], |q, d| d == 0 && q[1] == 0.5);
+    assert_eq!(eq, [[0.2, 0.0], [3.9, 0.5], [3.8, 1.0]]);
+}
+
 /// A sheet curved across (a parabola 20 wide, 3.2 high at a tenth in from either side) and two
 /// triangles standing on a chord across the curve: their corners on the surface, their planes
 /// across it, so they count far more than the area under them. The flip lays them along the

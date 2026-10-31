@@ -330,6 +330,7 @@ fn boundary(
                 }
                 eq.push(q);
             }
+            unwrap_along(&mut eq, dom.period, pole_along);
             if !oe.forward {
                 ep.reverse();
                 eq.reverse();
@@ -435,6 +436,28 @@ fn boundary(
         }
     }
     Ok(out)
+}
+
+/// One edge's nodes in a face's parameters, each moved by whole periods to follow the one before.
+/// Along an edge the nodes are a chord apart, so a step of more than half a period around a closed
+/// surface is its pcurve wrapped back into one period (a helix on a closed spline, as an importer
+/// computes it point by point): taken as the step it is, the face's loop jumped a period there and
+/// crossed itself in (u, v), was filled leniently and then refined to the point limit (20,000
+/// points on each turn of a thread or a spring). A node at a pole (`pole(q, d)`) keeps its
+/// parameter along `d`, which is free there.
+fn unwrap_along(eq: &mut [[f64; 2]], period: [Option<f64>; 2], pole: impl Fn([f64; 2], usize) -> bool) {
+    for k in 1..eq.len() {
+        let (Some(&prev), Some(&q)) = (eq.get(k - 1), eq.get(k)) else { continue };
+        let mut q = q;
+        for d in 0..2 {
+            if period[d].is_some() && !(pole(prev, d) || pole(q, d)) {
+                q[d] = uv::unwrap(q[d], prev[d], period[d]);
+            }
+        }
+        if let Some(slot) = eq.get_mut(k) {
+            *slot = q;
+        }
+    }
 }
 
 /// A face's boundary loops, and for each loop node the edge segment that starts there: the
