@@ -7,8 +7,7 @@
   what the user wrote, the failing features, the dialog's command, the log's warnings and the
   environment, never the design, the log or the screenshot, with home folders and the user name
   removed. The report records the issue's number.
-- A commit whose message names the report ("Fixes report <id>") or its issue ("Fixes #N")
-  closes the issue, pointing at that commit, and marks the report fixed; so does an issue closed
+- A commit of this fork with a line starting "Fixes report <id>" or "Fixes #N" closes the issue, pointing at that commit, and marks the report fixed; so does an issue closed
   on GitHub.
 
 The repository defaults to the `origin` remote's. Needs `gh` signed in, and `solidcraft-cli`:
@@ -59,9 +58,10 @@ def fixing_commit(report: str, issue: int | None) -> str | None:
     verbs = "(Fix|Fixes|Fixed|Close|Closes|Closed|Resolve|Resolves|Resolved)"
     # Report ids are digits and dashes (checked by the CLI): nothing in them needs escaping.
     names = [f"report {report}"] + ([f"#{issue}([^0-9]|$)"] if issue else [])
-    # Only this fork's own commits: upstream's history says "Fixes #N" about its own issues,
-    # whose numbers mean other issues here.
-    out = run(["git", "-C", str(ROOT), "log", "-1", "--format=%h", "-E", f"--grep={verbs} ({'|'.join(names)})", "HEAD", "--not", "--remotes=upstream"])
+    # Only this fork's own commits (upstream's history closes its own issues, whose numbers mean
+    # other issues here), and only a line that starts with the keyword, as a closing line does:
+    # a message that quotes one mid-sentence closes nothing.
+    out = run(["git", "-C", str(ROOT), "log", "-1", "--format=%h", "-E", f"--grep=^{verbs} ({'|'.join(names)})", "HEAD", "--not", "--remotes=upstream"])
     return out.strip() or None
 
 
