@@ -34,6 +34,31 @@ reply carries its own profile while recording.
 
 # Design loading
 
+## A large assembly's model cache: measured compressed, as it is stored (2026-11-01)
+
+A design saves its evaluated model with it, so opening it need not evaluate it again
+(`cache/bodies.bin`, docs/design-container.md). The same STEP assembly (1,508 bodies in 645
+components) saved without it: its cache is 398 MB encoded, which the writer compared with the
+room left in a 256 MB file, although the part is always compressed. The encoder also capped
+the payload at 256 MB. So every open of the saved design imported the STEP again. The cache is
+now measured by what it expands to, up to 512 MiB (as a STEP source and a mesh already are), and
+stored in parts of at most 256 MiB, so an older build still opens the design and only misses the
+cache. A file that comes out over 256 MB is written again as before.
+
+`solidcraft-cli bench-open`, release build, Apple M5 (10 cores), the saved design, two runs:
+
+| | before | after |
+|---|---:|---:|
+| file | 51 MB | 187 MB |
+| save (`file.save_as`) | 2.0 s | 3.8 s |
+| parse | 0.7 s | 2.2-3.5 s |
+| evaluate | 53.6-56.7 s | 0.06 s (adopted) |
+| mesh | 10.7-11.1 s | 13.1-16.4 s |
+| total (`time`) | 65.6 s | 15.6-20.1 s |
+| peak memory | 3.9 GB | 2.6 GB |
+
+The mesh phase is the same work (16,864,27x triangles); it varies with what else runs.
+
 ## Imported helical faces: refined to the point limit (2026-11-01)
 
 A 233 MB STEP assembly exported by another CAD system (1,193 solids placed as 3,928 bodies)
