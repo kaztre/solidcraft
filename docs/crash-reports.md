@@ -2,17 +2,37 @@
 
 When the desktop app crashes or hits an internal error, it writes a crash report on this
 computer. Each report holds enough to reproduce and fix the problem: in most cases the design
-and the exact commands that trigger it. Reports are never sent anywhere. To share one, use
-**Report…** in Help ▸ Crash Reports…, which opens a GitHub issue draft. Nothing is shared
-until you review and submit it, and the design is not part of the draft.
+and the exact commands that trigger it. Reports are never sent anywhere.
 
-To send a report:
+## Bug reports
 
-1. Review the title, report text and screenshot in SolidCraft, then click **Open GitHub draft**.
-   For long reports, SolidCraft copies the text to your clipboard; paste it into the GitHub draft.
-2. Attach the screenshot if you want to share it: use **Copy screenshot** and paste it into
-   GitHub, or use **Save screenshot…** and upload the PNG. Screenshots are not attached automatically.
-3. Click **Submit new issue** on GitHub to publish the report. Opening the draft alone does not send it.
+**Report a bug** (the app bar, Help, a failed feature's **Create Issue…**, or **Report…** in
+Help ▸ Crash Reports…) opens a form. Describe what happened, review the technical details and
+the screenshot, then click **Save report**. The report is saved on this computer in `reports/`,
+next to `crashes/` (on macOS `~/Library/Application Support/SolidCraft/reports`), and nothing
+is sent anywhere. Each report is a folder holding:
+
+- `report.json`: what you wrote, the app and system, the command the open dialog would run,
+  every feature's error and warning, the recent commands, and the report's status
+- `design.solidcraft`: the design as it was, unsaved changes included
+- `start.solidcraft` and `replay.json`: the design this run's commands started from, and those
+  commands
+- `log.txt`: this run's log (below)
+- `screenshot.png`: when the form had one
+
+Bug reports are never deleted automatically. `solidcraft-cli reports` lists them;
+`reports replay <id>` runs a report's commands and then the open dialog's command, and says
+which features fail. `reports status <id> fixed --commit <hash>` marks one fixed,
+`reports issue-text <id>` writes it as an issue you can publish (without the design, log or
+screenshot, and with home folders and the user name removed), and `reports clear --fixed`
+deletes the fixed ones. The `diagnostics.bug_report` command saves a report the same way.
+`SOLIDCRAFT_REPORT_DIR` overrides the folder.
+
+`scripts/sync-reports.py` keeps the reports and a GitHub repository (by default `origin`'s) in
+step: it files each open report that has no issue yet, with `reports issue-text`, and marks a
+report fixed once its issue is closed, recording the commit whose message says `Fixes #N`.
+`--dry-run` says what it would do. To run it on every push to `origin`, turn on the hook in
+`scripts/git-hooks/` with `git config core.hooksPath scripts/git-hooks`; it never stops a push.
 
 ## Where they are
 

@@ -1,4 +1,5 @@
-//! Reviewed issue drafts with local evidence; never publishes or uploads a report.
+//! Reviewed bug reports with local evidence, saved on this computer
+//! (`solidcraft_engine::bug_report`); never publishes or uploads a report.
 
 #[cfg(test)]
 use crate::ui_kit::{Container, Surface};
@@ -17,8 +18,6 @@ const MAX_BODY: usize = 24_000;
 // Room for all three answers and the original bounded diagnostic context.
 const MAX_REPORT: usize = 32_000;
 const MAX_IMAGE_PIXELS: usize = 16_000_000;
-// This fork's tracker; upstream's is https://github.com/tangency-labs/solidcraft/issues/new.
-const ISSUE_URL: &str = "https://github.com/kaztre/solidcraft/issues/new";
 
 thread_local! {
     static CAD_INPUT_BLOCKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -104,6 +103,9 @@ impl Drop for CadInput {
 #[derive(Default)]
 pub struct ReportState {
     pub draft: Option<Draft>,
+    /// Where Save report writes (`solidcraft_engine::bug_report::default_dir`, set by the desktop
+    /// app); without one the report can only be copied.
+    pub dir: Option<std::path::PathBuf>,
     pending: Option<Pending>,
     cad_focus: Option<egui::Id>,
 }
@@ -122,7 +124,10 @@ pub struct Draft {
     source_signature: u64,
     focus_requested: bool,
     missing_description: bool,
-    opened_github: bool,
+    /// The commands the open dialog would run, saved with the report so it replays them.
+    dialog_commands: Option<serde_json::Value>,
+    /// The report this draft was saved as, until it is edited again.
+    saved: Option<String>,
 }
 
 impl Draft {
@@ -140,7 +145,8 @@ impl Draft {
             source_signature,
             focus_requested: false,
             missing_description: false,
-            opened_github: false,
+            dialog_commands: None,
+            saved: None,
         }
     }
 
@@ -306,10 +312,16 @@ fn feature_context(feature: &solidcraft_engine::doc::Feature) -> String {
 /// Read-only context excludes whole documents, sketch geometry and imported file contents.
 pub fn draft_for(app: &SolveApp, dialog: Option<&dialogs::Dialog>, error: Option<&str>) -> Draft {
     let mut context = String::new();
+    let mut dialog_commands = None;
     let label = dialog.map(dialogs::report_title).unwrap_or_else(|| crate::mouse_gesture::Studio::of(app).label().into());
     if let Some(d) = dialog {
         match dialogs::apply_commands(app, d) {
-            Ok(commands) => context.push_str(&block(&json_context(&commands, 10_000))),
+            Ok(commands) => {
+                context.push_str(&block(&json_context(&commands, 10_000)));
+                dialog_commands = Some(serde_json::Value::Array(
+                    commands.iter().map(|(command, params)| serde_json::json!({ "command": command, "params": params })).collect(),
+                ));
+            }
             Err(e) => {
                 context.push_str(&format!("Could not build command parameters: {}\n", debug(&e, 1000)));
                 context.push_str(&block(&debug(&d.kind, 6000)));
@@ -360,6 +372,7 @@ pub fn draft_for(app: &SolveApp, dialog: Option<&dialogs::Dialog>, error: Option
     truncate(&mut title, 160);
     let mut draft = Draft::new(title, body, source_signature(app, dialog));
     draft.title_prefix = format!("{label}: ");
+    draft.dialog_commands = dialog_commands;
     draft
 }
 
@@ -447,29 +460,36 @@ pub fn begin_crash(app: &mut SolveApp, ctx: &egui::Context, report: &serde_json:
     app.issue_report.draft = Some(draft);
 }
 
-fn encode(value: &str) -> String {
-    let mut out = String::new();
-    for b in value.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
-            out.push(char::from(b));
-        } else {
-            let _ = write!(&mut out, "%{b:02X}");
-        }
-    }
-    out
+/// Saves the reviewed draft as a bug report on this computer, with the design, this run's
+/// commands, the log and the screenshot. Returns the report's id.
+pub(crate) fn save(app: &SolveApp, draft: &Draft) -> Result<String, String> {
+    let dir = app.issue_report.dir.clone().ok_or_else(|| crate::i18n::tr("ui.bug_report_no_folder").to_string())?;
+    let screenshot_png = match draft.image.as_deref() {
+        Some(image) => Some(png(image)?),
+        None => None,
+    };
+    let request = solidcraft_engine::bug_report::Request {
+        title: draft.report_title(),
+        what_happened: draft.description.clone(),
+        expected: draft.expected.clone(),
+        steps: draft.steps.clone(),
+        dialog: draft.dialog_commands.clone(),
+        context: draft.body.clone(),
+        screenshot_png,
+    };
+    let report = solidcraft_engine::bug_report::write(&app.session, &dir, &request)?;
+    Ok(report["id"].as_str().unwrap_or_default().to_string())
 }
 
-/// Long drafts stay local and can be copied into the browser editor; never discard them.
-pub fn draft_url(title: &str, body: &str) -> (String, bool) {
-    let title = limited(title, 160);
-    let base = format!("{ISSUE_URL}?title={}", encode(&title));
-    if body.len() <= MAX_BODY {
-        let url = format!("{base}&body={}", encode(body));
-        if url.len() <= 2000 {
-            return (url, false);
-        }
-    }
-    (base, true)
+/// The captured frame as PNG bytes.
+fn png(image: &ColorImage) -> Result<Vec<u8>, String> {
+    let [w, h] = image.size;
+    let pixels: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_array()).collect();
+    let rgba = image::RgbaImage::from_raw(u32::try_from(w).map_err(|e| e.to_string())?, u32::try_from(h).map_err(|e| e.to_string())?, pixels)
+        .ok_or_else(|| "the screenshot has the wrong size".to_string())?;
+    let mut out = std::io::Cursor::new(Vec::new());
+    rgba.write_to(&mut out, image::ImageFormat::Png).map_err(|e| e.to_string())?;
+    Ok(out.into_inner())
 }
 
 pub fn begin(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&dialogs::Dialog>, error: Option<&str>) {
@@ -573,7 +593,7 @@ pub(crate) fn receive(app: &mut SolveApp, token: u64, image: Arc<ColorImage>) {
             draft.note = "Screenshot dimensions are unsupported. The text draft is still available.".into();
         } else {
             draft.image = Some(image);
-            draft.note = "Screenshot captured locally. Review it before attaching it on GitHub.".into();
+            draft.note = crate::i18n::tr("ui.bug_report_screenshot_captured").into();
         }
     }
 }
@@ -633,6 +653,16 @@ mod tests {
         dialog.inputs.get_mut(1).unwrap().items = vec![Sel::Body { name: "Cutter".into() }];
     }
 
+    /// Save report writes into this test's own folder, never the user's reports.
+    fn report_dir(h: &mut crate::scenario::Harness) -> std::path::PathBuf {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let d = std::env::temp_dir().join(format!("solidcraft-ui-reports-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        h.app.issue_report.dir = Some(d.clone());
+        d
+    }
+
     fn click_commands(h: &mut crate::scenario::Harness, label: &str) -> Vec<egui::OutputCommand> {
         let [x, y] = h.widget(label).unwrap();
         assert_eq!(h.call("ui.move", json!({"x":x,"y":y}))["ok"], true);
@@ -674,7 +704,7 @@ mod tests {
         h.app.home.open = false;
         h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
         h.frames(4);
-        for label in ["What happened?", "Steps to reproduce (optional)", "Expected result (optional)", "Technical details", "Continue on GitHub"] {
+        for label in ["What happened?", "Steps to reproduce (optional)", "Expected result (optional)", "Technical details", "Save report"] {
             assert!(h.widget(label).is_some(), "missing report form control: {label}");
         }
         assert!(h.widget("Describe the intended result.").is_none(), "Markdown instructions must not be editable answers");
@@ -699,90 +729,92 @@ mod tests {
     }
 
     #[test]
-    fn issue_report_requires_an_answer_before_browser_handoff_without_changing_the_design() {
+    fn issue_report_requires_an_answer_before_saving_without_changing_the_design() {
         for (size, scale) in [([1600, 1000], 1.0), ([640, 480], 2.0)] {
             let mut h = crate::scenario::Harness::new();
+            let dir = report_dir(&mut h);
             h.app.home.open = false;
             h.app.preferences.ui_scale = scale;
             h.call("ui.resize", json!({"width":size[0],"height":size[1]}));
             h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
             h.frames(16);
             let before = (h.app.session.doc.to_json(), h.app.session.revision, h.app.session.undo.len());
-            let commands = click_commands(&mut h, "Continue on GitHub");
-            assert!(!commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(_))));
+            click_commands(&mut h, "Save report");
             assert!(h.app.issue_report.draft.as_ref().unwrap().missing_description);
+            assert!(solidcraft_engine::bug_report::list(&dir).is_empty());
             assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("issue_report_body")));
             h.step(&json!({"text":"The preview disappeared"})).unwrap();
-            let commands = click_commands(&mut h, "Continue on GitHub");
-            assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(url) if url.url.starts_with(ISSUE_URL))));
-            assert!(h.app.issue_report.draft.as_ref().unwrap().description.contains("The preview disappeared"));
+            let commands = click_commands(&mut h, "Save report");
+            assert!(!commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(_))), "nothing goes to a browser");
+            let saved = solidcraft_engine::bug_report::list(&dir);
+            assert_eq!(saved.len(), 1);
+            assert_eq!(h.app.issue_report.draft.as_ref().unwrap().saved.as_deref(), Some(saved[0].id.as_str()));
+            let report = solidcraft_engine::bug_report::read(&dir, &saved[0].id).unwrap();
+            assert_eq!(report["what_happened"], "The preview disappeared");
+            assert!(report["design_path"].is_string());
+            // Saved and not edited since: another click makes no copy.
+            click_commands(&mut h, "Save report");
+            assert_eq!(solidcraft_engine::bug_report::list(&dir).len(), 1);
             assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.revision, h.app.session.undo.len()));
+            let _ = std::fs::remove_dir_all(dir);
         }
     }
 
     #[test]
-    fn issue_report_handoff_includes_edits_from_the_click_frame() {
+    fn issue_report_save_includes_edits_from_the_click_frame() {
         for field in ["issue_report_body", "issue_report_title", "issue_report_steps", "issue_report_expected", "issue_report_technical"] {
-            for clipboard in [false, true] {
-                let mut h = crate::scenario::Harness::new();
-                h.app.home.open = false;
-                let mut draft = Draft::new("Previous summary".into(), "Private diagnostic details".into(), 0);
-                if field != "issue_report_body" {
-                    draft.description = "Previously reviewed problem".into();
-                }
-                if clipboard {
-                    draft.steps = "Reproduction context. ".repeat(100);
-                }
-                h.app.issue_report.draft = Some(draft);
-                h.frames(16);
-                if field == "issue_report_technical" {
-                    h.call("ui.scroll", json!({"x":800,"y":600,"delta":-1000}));
-                    h.step(&json!({"widget":"Technical details"})).unwrap();
-                    h.call("ui.scroll", json!({"x":800,"y":600,"delta":-1000}));
-                }
-                h.ctx.memory_mut(|m| m.request_focus(egui::Id::new(field)));
-                h.frames(1);
-                let [x, y] = h.widget("Continue on GitHub").unwrap();
-                let pos = egui::pos2(x as f32, y as f32);
-                let modifiers = egui::Modifiers { ctrl: true, command: true, ..Default::default() };
-                let raw = egui::RawInput {
-                    screen_rect: Some(h.ctx.content_rect()),
-                    focused: true,
-                    events: vec![
-                        egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers },
-                        egui::Event::Paste("Latest reviewed content".into()),
-                        egui::Event::PointerMoved(pos),
-                        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
-                        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() },
-                    ],
-                    ..Default::default()
-                };
-                let app = &mut h.app;
-                let mut output = h.ctx.run_ui(raw, |ui| {
-                    app.logic(ui.ctx());
-                    app.ui(ui);
-                });
-                let draft = h.app.issue_report.draft.as_ref().unwrap();
-                let edited = match field {
-                    "issue_report_body" => &draft.description,
-                    "issue_report_title" => &draft.title,
-                    "issue_report_steps" => &draft.steps,
-                    "issue_report_expected" => &draft.expected,
-                    _ => &draft.body,
-                };
-                assert_eq!(edited, "Latest reviewed content", "{field}, clipboard={clipboard}");
-                let body = draft.report_body();
-                let (url, copy_needed) = draft_url(&draft.report_title(), &body);
-                assert!(
-                    output.platform_output.commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(u) if u.url == url)),
-                    "handoff must use this frame's edits: {field}, clipboard={clipboard}"
-                );
-                if copy_needed {
-                    assert!(output.platform_output.commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == &body)));
-                }
-                output.textures_delta.clear();
-                assert!(draft.opened_github && !draft.missing_description);
+            let mut h = crate::scenario::Harness::new();
+            let dir = report_dir(&mut h);
+            h.app.home.open = false;
+            let mut draft = Draft::new("Previous summary".into(), "Private diagnostic details".into(), 0);
+            if field != "issue_report_body" {
+                draft.description = "Previously reviewed problem".into();
             }
+            h.app.issue_report.draft = Some(draft);
+            h.frames(16);
+            if field == "issue_report_technical" {
+                h.call("ui.scroll", json!({"x":800,"y":600,"delta":-1000}));
+                h.step(&json!({"widget":"Technical details"})).unwrap();
+                h.call("ui.scroll", json!({"x":800,"y":600,"delta":-1000}));
+            }
+            h.ctx.memory_mut(|m| m.request_focus(egui::Id::new(field)));
+            h.frames(1);
+            let [x, y] = h.widget("Save report").unwrap();
+            let pos = egui::pos2(x as f32, y as f32);
+            let modifiers = egui::Modifiers { ctrl: true, command: true, ..Default::default() };
+            let raw = egui::RawInput {
+                screen_rect: Some(h.ctx.content_rect()),
+                focused: true,
+                events: vec![
+                    egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers },
+                    egui::Event::Paste("Latest reviewed content".into()),
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
+                    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() },
+                ],
+                ..Default::default()
+            };
+            let app = &mut h.app;
+            let mut output = h.ctx.run_ui(raw, |ui| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            });
+            output.textures_delta.clear();
+            let draft = h.app.issue_report.draft.as_ref().unwrap();
+            let (edited, key) = match field {
+                "issue_report_body" => (&draft.description, "what_happened"),
+                "issue_report_title" => (&draft.title, "title"),
+                "issue_report_steps" => (&draft.steps, "steps"),
+                "issue_report_expected" => (&draft.expected, "expected"),
+                _ => (&draft.body, "context"),
+            };
+            assert_eq!(edited, "Latest reviewed content", "{field}");
+            let saved = solidcraft_engine::bug_report::list(&dir);
+            assert_eq!(saved.len(), 1, "{field}");
+            let report = solidcraft_engine::bug_report::read(&dir, &saved[0].id).unwrap();
+            assert_eq!(report[key], "Latest reviewed content", "the report must hold this frame's edits: {field}");
+            assert!(draft.saved.is_some() && !draft.missing_description);
+            let _ = std::fs::remove_dir_all(dir);
         }
     }
 
@@ -842,13 +874,6 @@ mod tests {
         let draft = draft_for(&app, app.dialog.as_ref(), Some(&hostile));
         assert!(draft.body.len() <= MAX_BODY);
         assert!(draft.body.contains("[truncated]"));
-        let (url, copy) = draft_url("Cut &labels=secret #? 🚀", "actual\n```\n&assignees=someone");
-        assert!(!copy);
-        assert!(url.starts_with(ISSUE_URL));
-        assert_eq!(url.matches('&').count(), 1);
-        assert!(url.contains("%26labels%3Dsecret") && url.contains("%F0%9F%9A%80"));
-        let (short, copy) = draft_url(&hostile, &draft.body);
-        assert!(copy && short.len() <= 2000 && !short.contains("&body="));
         assert!(draft.body.contains("Stock"), "fallback must retain the editable full report");
     }
 
@@ -910,8 +935,9 @@ mod tests {
     }
 
     #[test]
-    fn issue_report_long_draft_open_click_copies_the_full_reviewed_text() {
+    fn issue_report_saves_the_reviewed_text_and_screenshot_and_copies_on_request() {
         let mut h = crate::scenario::Harness::new();
+        let dir = report_dir(&mut h);
         h.app.home.open = false;
         let mut draft = draft_for(&h.app, None, None);
         draft.body = "Reviewed context 🚀 &labels=private\n".repeat(120);
@@ -920,44 +946,44 @@ mod tests {
         draft.expected = "A preview of the extrusion".into();
         draft.image = Some(Arc::new(ColorImage::new([2, 2], vec![egui::Color32::GREEN; 4])));
         let reviewed = draft.report_body();
+        let context = draft.body.clone();
         h.app.issue_report.draft = Some(draft);
         h.frames(16);
-        assert!(h.widget("Opens your browser and copies the report text for you to paste into GitHub.").is_some());
-        assert!(h.widget("Reports are public. A GitHub account is required.").is_some());
-        let commands = click_commands(&mut h, "Continue on GitHub");
+        let commands = click_commands(&mut h, "Copy report");
         assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == &reviewed)), "commands: {commands:?}");
-        assert!(
-            commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(url) if url.url.starts_with(ISSUE_URL) && !url.url.contains("&body=")))
-        );
-        assert_eq!(h.app.issue_report.draft.as_ref().unwrap().report_body(), reviewed);
-        assert!(h.app.issue_report.draft.as_ref().unwrap().opened_github);
-        click_commands(&mut h, "Copy screenshot");
-        assert!(!h.app.issue_report.draft.as_ref().unwrap().opened_github, "copying an image replaces the report text on the clipboard");
-        assert!(h.widget("Opens your browser and copies the report text for you to paste into GitHub.").is_some());
-        click_commands(&mut h, "Continue on GitHub");
+        assert!(solidcraft_engine::bug_report::list(&dir).is_empty(), "copying saves nothing");
+        click_commands(&mut h, "Save report");
+        let saved = solidcraft_engine::bug_report::list(&dir);
+        assert_eq!(saved.len(), 1);
+        let report = solidcraft_engine::bug_report::read(&dir, &saved[0].id).unwrap();
+        assert_eq!(report["context"], context.as_str());
+        assert_eq!(report["steps"], "1. Select a face\n2. Start Extrude");
+        let png = std::fs::read(report["screenshot_path"].as_str().unwrap()).unwrap();
+        let image = image::load_from_memory(&png).unwrap();
+        assert_eq!((image.width(), image.height()), (2, 2));
         click_commands(&mut h, "Remove screenshot");
         assert!(h.app.issue_report.draft.as_ref().unwrap().image.is_none());
         assert!(h.widget("Screenshot removed from this draft.").is_some());
-        assert!(h.widget("Report text copied. Paste it into GitHub and submit your report there.").is_some());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
-    fn issue_report_blank_summary_uses_the_export_title_for_clipboard_guidance() {
+    fn issue_report_blank_summary_saves_under_the_derived_title() {
         let mut h = crate::scenario::Harness::new();
+        let dir = report_dir(&mut h);
         h.app.home.open = false;
         let mut draft = draft_for(&h.app, None, None);
         draft.title.clear();
         draft.description = "d".repeat(160);
-        draft.body = "x".repeat(1500);
-        let reviewed = draft.report_body();
-        assert!(!draft_url("", &reviewed).1, "the fallback title must be what crosses the URL limit");
-        assert!(draft_url(&draft.report_title(), &reviewed).1);
+        let title = draft.report_title();
+        assert!(!title.trim().is_empty());
         h.app.issue_report.draft = Some(draft);
         h.frames(16);
-        assert!(h.widget("Opens your browser and copies the report text for you to paste into GitHub.").is_some());
-        let commands = click_commands(&mut h, "Continue on GitHub");
-        assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == &reviewed)));
-        assert!(h.widget("Report text copied. Paste it into GitHub and submit your report there.").is_some());
+        click_commands(&mut h, "Save report");
+        let saved = solidcraft_engine::bug_report::list(&dir);
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].title, title.trim());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -969,7 +995,7 @@ mod tests {
                 h.app.home.open = false;
                 h.call("ui.resize", json!({"width":size[0],"height":size[1]}));
                 let mut draft = draft_for(&h.app, None, None);
-                draft.note = "Screenshot captured locally. Review it before attaching it on GitHub.".into();
+                draft.note = "Screenshot captured. Review it before saving the report.".into();
                 draft.image = Some(Arc::new(ColorImage::new([1600, 1000], vec![egui::Color32::GREEN; 1_600_000])));
                 h.app.issue_report.draft = Some(draft);
                 h.frames(20);
@@ -980,7 +1006,7 @@ mod tests {
                 assert!((idle.width() - settled.width()).abs() < 1.0, "size={size:?}: {settled:?} grew to {idle:?}");
                 assert!(idle.width() <= 790.0, "report must retain its width limit: {idle:?}");
                 assert!(h.ctx.content_rect().shrink(8.0).contains_rect(idle), "size={size:?} scale={scale}: retain an outer margin: {idle:?}");
-                for label in ["Continue on GitHub", "Close draft"] {
+                for label in ["Save report", "Close draft"] {
                     let [x, y] = h.widget(label).unwrap();
                     assert!(idle.contains(egui::pos2(x as f32, y as f32)), "{label} must stay visible: {idle:?}, {x}, {y}");
                 }

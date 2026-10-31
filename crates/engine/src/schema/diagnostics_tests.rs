@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use super::{ProfileParams, ValidationParams};
+use super::{BugReportParams, ProfileParams, ValidationParams};
 use crate::Session;
 use crate::schema::input_schema_for;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors};
@@ -9,6 +9,7 @@ use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors};
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ProfileParams>(), &["enabled", "reset", "top", "trace"]);
     assert_keys(input_schema_for::<ValidationParams>(), &["mode"]);
+    assert_keys(input_schema_for::<BugReportParams>(), &["context", "dialog", "expected", "screenshot_png", "steps", "title", "what_happened"]);
 }
 
 #[test]
@@ -21,6 +22,9 @@ fn strict_keeps_todays_errors() {
         ("diagnostics.profile", json!({"trace": 5})),
         ("diagnostics.validation", json!({"mode": "each step"})),
         ("diagnostics.validation", json!({"mode": true})),
+        ("diagnostics.bug_report", json!({"title": 3})),
+        ("diagnostics.bug_report", json!({"title": "x", "steps": ["a"]})),
+        ("diagnostics.bug_report", json!({"title": "x", "screenshot_png": false})),
     ]);
 }
 
