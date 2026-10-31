@@ -379,15 +379,14 @@ fn a_modelled_thread_that_would_cut_nothing_is_refused() {
 }
 
 /// Issue 2688: an M8 modelled thread in a 6 mm hole (narrower than its 6.65 mm minor diameter)
-/// was refused as "the face is too far from the thread's diameter". Without boring (`bore:
-/// false`, as every design saved before it), it says what is wrong and what to drill, as a hole
-/// that is too wide does; and the same for a shaft that is too thick.
+/// was refused as "the face is too far from the thread's diameter". Left as it is (no
+/// `fit_hole`), it says what is wrong and what to drill, as a hole that is too wide does; and the
+/// same for a shaft that is too thick.
 #[test]
 fn a_hole_too_narrow_or_a_shaft_too_thick_says_which_and_what_fits() {
     let mut s = hex_nut(6.0);
     let before = volume(&mut s, "Nut");
-    let e =
-        s.execute("solid.thread", &json!({"face": [3.0, 0, 2], "designation": "M8", "modeled": true, "bore": false})).err().map(|e| e.to_string());
+    let e = s.execute("solid.thread", &json!({"face": [3.0, 0, 2], "designation": "M8", "modeled": true})).err().map(|e| e.to_string());
     let e = e.unwrap_or_default();
     assert!(e.contains("this 6 mm hole is too narrow for a modelled M8 thread") && e.contains("drill 6.8 mm for M8"), "{e}");
     assert!(!e.contains("too far"), "{e}");
@@ -401,30 +400,128 @@ fn a_hole_too_narrow_or_a_shaft_too_thick_says_which_and_what_fits() {
     assert!(e.contains("this 9 mm shaft is too thick for a modelled M8 thread") && e.contains("make the shaft 8 mm for M8"), "{e}");
 }
 
-/// A modelled thread in a hole too narrow for its teeth bores the hole to the size's tap drill
-/// first (`bore`, on for new modelled threads): an M8 in a 6 mm hole is the part an M8 cut in a
-/// 6.8 mm hole is, and its feature says what was bored. A hole the thread fits is left alone.
+/// `fit_hole` makes a hole the thread size's tap drill first, any size in any hole: an M8 in a
+/// 6 mm hole bores it to 6.8 mm, an M6 in an 8 mm hole fills it to 5 mm, modelled or cosmetic,
+/// each the part that size threads in a hole drilled to its tap drill, and the feature says what
+/// it did. A hole that is the drill already is untouched; without `fit_hole` none is.
 #[test]
-fn a_hole_too_narrow_is_bored_to_the_tap_drill_and_the_feature_says_so() {
-    let threaded = |hole: f64, bore: bool| {
+fn fit_hole_makes_the_hole_the_tap_drill_of_any_size_picked() {
+    let threaded = |hole: f64, size: &str, modeled: bool, fit: bool| {
         let mut s = hex_nut(hole);
-        let made = run(&mut s, "solid.thread", json!({"face": [hole / 2.0, 0, 2], "designation": "M8", "modeled": true, "bore": bore}));
+        let p = json!({"face": [hole / 2.0, 0, 2], "designation": size, "modeled": modeled, "fit_hole": fit});
+        let made = run(&mut s, "solid.thread", p);
         let id = made["feature"].as_u64().unwrap();
         let warning = s.model.result(id).and_then(|r| r.warning.clone());
-        (volume(&mut s, "Nut"), warning)
+        let radius = s.model.state().threads.iter().find(|t| t.feature == id).map(|t| t.radius);
+        (volume(&mut s, "Nut"), warning, radius)
     };
-    let (narrow, said) = threaded(6.0, true);
+    for (hole, size, drill, how) in [(6.0, "M8", 6.8, "bored"), (8.0, "M6", 5.0, "filled")] {
+        let said = format!("the {hole} mm hole was {how} to {drill} mm, the tap drill for {size}");
+        for modeled in [true, false] {
+            let (fitted, warning, radius) = threaded(hole, size, modeled, true);
+            assert!(warning.as_deref().unwrap_or_default().contains(&said), "{size} in {hole}, modeled {modeled}: {warning:?}");
+            let (drilled, none, _) = threaded(drill, size, modeled, true);
+            assert!(none.is_none(), "a hole that is the drill is left alone: {none:?}");
+            assert!((fitted - drilled).abs() < 1e-4 * drilled, "{size} in {hole}, modeled {modeled}: {fitted} against {drilled}");
+            if !modeled {
+                assert!((radius.unwrap() - drill / 2.0).abs() < 1e-9, "the cosmetic thread shows on the fitted hole");
+            }
+        }
+    }
+    // Without fit_hole a cosmetic thread changes nothing.
+    let mut s = hex_nut(8.0);
+    let before = volume(&mut s, "Nut");
+    run(&mut s, "solid.thread", json!({"face": [4.0, 0, 2], "designation": "M10"}));
+    assert!((volume(&mut s, "Nut") - before).abs() < 1e-9);
+}
+
+/// An internal thread's chamfered entry is a countersink cut after the groove, at each free end
+/// `tip` names: both ends of a through hole take twice what the start alone does. A cosmetic
+/// thread still cuts no chamfer.
+#[test]
+fn an_internal_thread_takes_a_chamfered_entry_at_its_free_ends() {
+    let removed = |tip: Option<&str>| {
+        let mut s = hex_nut(6.8);
+        let before = volume(&mut s, "Nut");
+        let mut p = json!({"face": [3.4, 0, 3.5], "designation": "M8", "modeled": true, "from": [3.4, 0, 4]});
+        if let Some(t) = tip {
+            p["tip"] = json!(t);
+        }
+        run(&mut s, "solid.thread", p);
+        before - volume(&mut s, "Nut")
+    };
+    let plain = removed(None);
+    let (start, both) = (removed(Some("start")) - plain, removed(Some("both")) - plain);
+    assert!(start > 0.5, "the countersink takes material: {start}");
+    assert!((both - 2.0 * start).abs() < 0.05 * both, "both ends take twice one: {both} against {start}");
+    let mut s = hex_nut(6.8);
+    let e = s.execute("solid.thread", &json!({"face": [3.4, 0, 2], "designation": "M8", "tip": "both"})).unwrap_err().to_string();
+    assert!(e.contains("only on a modelled thread"), "{e}");
+}
+
+/// `flip` starts a thread from the other end of its face: a 2 mm thread from the top of a 4 mm
+/// nut's hole is the bottom 2 mm flipped.
+#[test]
+fn flip_starts_the_thread_from_the_other_end() {
+    let span = |flip: bool| {
+        let mut s = hex_nut(6.8);
+        let p = json!({"face": [3.4, 0, 2], "designation": "M8", "length": 2, "from": [3.4, 0, 4], "flip": flip});
+        let made = run(&mut s, "solid.thread", p);
+        let t = &made["thread"];
+        let (a, b) = (t["start"].as_f64().unwrap(), t["end"].as_f64().unwrap());
+        assert!((b - a - 2.0).abs() < 1e-9, "{t}");
+        (a, b)
+    };
+    let (top, bottom) = (span(false), span(true));
+    assert!((top.0 - bottom.1).abs() < 1e-9 || (bottom.0 - top.1).abs() < 1e-9, "the halves meet: {top:?} {bottom:?}");
+    assert_ne!(top, bottom);
+}
+
+/// A print clearance cuts every wall of the groove that much further into the material: an
+/// internal thread's hole is made the tap drill plus twice the clearance (with `fit_hole`), and
+/// each groove takes more, inside a nut and on a shaft alike. A cosmetic thread has no walls to
+/// move, and a clearance past a quarter of the pitch is refused.
+#[test]
+fn a_print_clearance_moves_every_wall_of_the_thread_away_from_its_mate() {
+    let nut = |clearance: Option<&str>| {
+        let mut s = hex_nut(6.8);
+        let mut p = json!({"face": [3.4, 0, 2], "designation": "M8", "modeled": true, "fit_hole": true, "from": [3.4, 0, 4]});
+        if let Some(c) = clearance {
+            p["print_clearance"] = json!(c);
+        }
+        let made = run(&mut s, "solid.thread", p);
+        let id = made["feature"].as_u64().unwrap();
+        (volume(&mut s, "Nut"), s.model.result(id).and_then(|r| r.warning.clone()))
+    };
+    let (plain, none) = nut(None);
+    assert!(none.is_none(), "{none:?}");
+    let (printed, said) = nut(Some("0.075 mm"));
     let said = said.unwrap_or_default();
-    assert!(said.contains("the 6 mm hole was bored to 6.8 mm, the tap drill for M8"), "{said}");
-    let (drilled, none) = threaded(6.8, true);
-    assert!(none.is_none(), "a hole the thread fits is not bored: {none:?}");
-    assert!((narrow - drilled).abs() < 1e-4 * drilled, "bored {narrow} against drilled {drilled}");
-    let (unbored, _) = threaded(6.8, false);
-    assert!((unbored - drilled).abs() < 1e-9 * drilled, "bore changes nothing in a hole the thread fits");
-    // A cosmetic thread changes no hole.
-    let mut s = hex_nut(6.0);
-    let e = s.execute("solid.thread", &json!({"face": [3.0, 0, 2], "designation": "M8", "bore": true})).unwrap_err().to_string();
-    assert!(e.contains("`bore` goes with a modelled thread"), "{e}");
+    assert!(said.contains("bored to 6.95 mm, the tap drill for M8 with 0.075 mm print clearance"), "{said}");
+    assert!(plain - printed > 0.5, "the clearance takes material: {plain} -> {printed}");
+
+    let shaft = |clearance: Option<&str>| {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 10, "body_name": "Shaft"}));
+        let mut p = json!({"face": [4, 0, 5], "designation": "M8", "modeled": true, "length": 6, "from": [4, 0, 10]});
+        if let Some(c) = clearance {
+            p["print_clearance"] = json!(c);
+        }
+        run(&mut s, "solid.thread", p);
+        volume(&mut s, "Shaft")
+    };
+    assert!(shaft(None) - shaft(Some("0.075 mm")) > 0.5, "a screw's groove grows too");
+
+    let mut s = hex_nut(6.8);
+    for (p, why) in [
+        (json!({"face": [3.4, 0, 2], "designation": "M8", "print_clearance": "0.1 mm"}), "modelled thread"),
+        (json!({"face": [3.4, 0, 2], "designation": "M8", "modeled": true, "print_clearance": "0.4 mm"}), "at most 0.227 mm for an M8 hole"),
+        (json!({"face": [3.4, 0, 2], "designation": "M8", "modeled": true, "print_clearance": "0 mm"}), "more than 0"),
+        (json!({"face": [3.4, 0, 2], "designation": "M8", "modeled": true, "print_clearance": "-1 mm"}), "more than 0"),
+    ] {
+        let e = s.execute("solid.thread", &p).unwrap_err().to_string();
+        assert!(e.contains(why), "{p}: {e}");
+    }
 }
 
 /// The limit is a quarter of the basic depth 5H/8: a hole up to 4.78 mm for M5 (4.86 mm for
@@ -946,13 +1043,12 @@ fn a_chamfered_tip_tapers_the_last_teeth() {
     let want = PI * 64.0 * 10.0 + PI * 25.0 * w + m10_stock(10.0 + w, 35.0, |z| 5f64.min(rf + (35.0 - z) * slope));
     let got = exact_volume(&s, "Part");
     assert!((got - want).abs() < want * 1e-4, "{got} vs {want}");
-    // Internal threads take a countersink instead.
+    // An internal thread's chamfer is a countersink at its entry
+    // (an_internal_thread_takes_a_chamfered_entry_at_its_free_ends).
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"corner": [-10, -10, 0], "length": 20, "width": 20, "height": 10, "body_name": "Nut"}));
     run(&mut s, "solid.hole", json!({"position": [0, 0, 10], "diameter": 8.5}));
-    let e =
-        s.execute("solid.thread", &json!({"face": [4.25, 0, 5], "designation": "M10", "tip": "both", "modeled": true})).err().map(|e| e.to_string());
-    assert!(e.unwrap_or_default().contains("countersink"));
+    run(&mut s, "solid.thread", json!({"face": [4.25, 0, 5], "designation": "M10", "tip": "both", "modeled": true}));
     // ISO 4753 is for ISO metric threads: another form names its chamfer depth.
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 40, "body_name": "Screw"}));

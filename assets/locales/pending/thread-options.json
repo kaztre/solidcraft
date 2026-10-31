@@ -1,0 +1,44 @@
+{
+  "en": {
+    "thread.fit_hole": "Resize hole to tap drill",
+    "thread.flip": "Flip start",
+    "thread.print_clearance": "Print clearance",
+    "thread.print_clearance_hint": "Every face of the thread moves this far from the mating part (0.05 to 0.2 mm suits most printers)",
+    "thread.printed": "3D printed"
+  },
+  "ar": {
+    "thread.fit_hole": "تغيير قطر الثقب إلى قطر مثقاب اللولبة",
+    "thread.flip": "عكس البداية",
+    "thread.print_clearance": "خلوص الطباعة",
+    "thread.print_clearance_hint": "يبتعد كل وجه من اللولب هذه المسافة عن الجزء المقابل (0.05 إلى 0.2 مم تناسب معظم الطابعات)",
+    "thread.printed": "مطبوع ثلاثي الأبعاد"
+  },
+  "he": {
+    "thread.fit_hole": "התאמת החור לקוטר מקדח ההברגה",
+    "thread.flip": "היפוך ההתחלה",
+    "thread.print_clearance": "מרווח הדפסה",
+    "thread.print_clearance_hint": "כל פאה של ההברגה מתרחקת כך מהחלק המשלים (0.05 עד 0.2 מ״מ מתאימים לרוב המדפסות)",
+    "thread.printed": "מודפס בתלת־ממד"
+  },
+  "ja": {
+    "thread.fit_hole": "穴を下穴径に合わせる",
+    "thread.flip": "開始端を反転",
+    "thread.print_clearance": "印刷クリアランス",
+    "thread.print_clearance_hint": "ねじの各面を相手部品からこの距離だけ離します（多くのプリンターでは0.05〜0.2 mm）",
+    "thread.printed": "3Dプリント"
+  },
+  "vi": {
+    "thread.fit_hole": "Đổi cỡ lỗ theo mũi khoan ta-rô",
+    "thread.flip": "Đảo đầu bắt đầu",
+    "thread.print_clearance": "Khe hở in",
+    "thread.print_clearance_hint": "Mọi mặt của ren lùi xa chi tiết lắp ghép một khoảng này (0,05 đến 0,2 mm hợp với đa số máy in)",
+    "thread.printed": "In 3D"
+  },
+  "zh": {
+    "thread.fit_hole": "将孔改为攻丝底孔直径",
+    "thread.flip": "翻转起点",
+    "thread.print_clearance": "打印间隙",
+    "thread.print_clearance_hint": "螺纹的每个面都与配合件相距此距离（大多数打印机适合 0.05 到 0.2 毫米）",
+    "thread.printed": "3D 打印"
+  }
+}
