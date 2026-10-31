@@ -30,7 +30,8 @@ deletes the fixed ones. The `diagnostics.bug_report` command saves a report the 
 
 `scripts/sync-reports.py` keeps the reports and a GitHub repository (by default `origin`'s) in
 step: it files each open report that has no issue yet, with `reports issue-text`, and marks a
-report fixed once its issue is closed, recording the commit whose message says `Fixes #N`.
+report fixed once its issue is closed or a commit's message says `Fixes report <id>` or
+`Fixes #N` (it then closes the issue, pointing at that commit).
 `--dry-run` says what it would do. To run it on every push to `origin`, turn on the hook in
 `scripts/git-hooks/` with `git config core.hooksPath scripts/git-hooks`; it never stops a push.
 

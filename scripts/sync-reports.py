@@ -7,8 +7,9 @@
   what the user wrote, the failing features, the dialog's command, the log's warnings and the
   environment, never the design, the log or the screenshot, with home folders and the user name
   removed. The report records the issue's number.
-- Every open report whose issue is closed is marked fixed, with the commit whose message says
-  "Fixes #N" when git has one.
+- A commit whose message names the report ("Fixes report <id>") or its issue ("Fixes #N")
+  closes the issue, pointing at that commit, and marks the report fixed; so does an issue closed
+  on GitHub.
 
 The repository defaults to the `origin` remote's. Needs `gh` signed in, and `solidcraft-cli`:
 $SOLIDCRAFT_CLI, else target/release, else the installed app, else PATH. The pre-push hook runs
@@ -53,8 +54,12 @@ def origin_repo() -> str:
     return m.group(1)
 
 
-def fixing_commit(issue: int) -> str | None:
-    out = run(["git", "-C", str(ROOT), "log", "-1", "--format=%h", "-E", f"--grep=(Fix|Fixes|Fixed|Close|Closes|Closed|Resolve|Resolves|Resolved) #{issue}\\b"])
+def fixing_commit(report: str, issue: int | None) -> str | None:
+    """The newest commit whose message says it fixes the report, by its id or its issue."""
+    verbs = "(Fix|Fixes|Fixed|Close|Closes|Closed|Resolve|Resolves|Resolved)"
+    # Report ids are digits and dashes (checked by the CLI): nothing in them needs escaping.
+    names = [f"report {report}"] + ([f"#{issue}([^0-9]|$)"] if issue else [])
+    out = run(["git", "-C", str(ROOT), "log", "-1", "--format=%h", "-E", f"--grep={verbs} ({'|'.join(names)})"])
     return out.strip() or None
 
 
@@ -84,21 +89,21 @@ def main() -> int:
                 url = run(["gh", "issue", "create", "-R", repo, "--title", text["title"], "--body-file", body.name]).strip()
             finally:
                 os.unlink(body.name)
-            number = int(url.rstrip("/").rsplit("/", 1)[-1])
-            run([sc, "reports", "status", rid, "--issue", str(number)])
+            issue = int(url.rstrip("/").rsplit("/", 1)[-1])
+            run([sc, "reports", "status", rid, "--issue", str(issue)])
             print(f"sync-reports: filed {rid} as {url}")
-            continue
+        commit = fixing_commit(rid, issue)
         state = run(["gh", "issue", "view", str(issue), "-R", repo, "--json", "state", "--jq", ".state"]).strip()
-        if state != "CLOSED":
+        if state != "CLOSED" and not commit:
             print(f"sync-reports: {rid} is open as #{issue}")
             continue
-        commit = fixing_commit(issue)
         if a.dry_run:
-            print(f"sync-reports: would mark {rid} fixed (#{issue} is closed{', by ' + commit if commit else ''})")
+            print(f"sync-reports: would mark {rid} fixed (#{issue}{', by ' + commit if commit else ' closed'})")
             continue
-        args = [sc, "reports", "status", rid, "fixed"] + (["--commit", commit] if commit else [])
-        run(args)
-        print(f"sync-reports: {rid} fixed (#{issue} closed{', by ' + commit if commit else ''})")
+        if state != "CLOSED":
+            run(["gh", "issue", "close", str(issue), "-R", repo, "-c", f"Fixed in {commit}."])
+        run([sc, "reports", "status", rid, "fixed"] + (["--commit", commit] if commit else []))
+        print(f"sync-reports: {rid} fixed (#{issue}{', by ' + commit if commit else ' closed'})")
     return 0
 
 
