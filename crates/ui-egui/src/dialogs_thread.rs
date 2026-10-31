@@ -653,12 +653,17 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, kind: &FeatureKind) {
         chamfer_angle,
         chamfer_depth,
         steep_flank,
+        bore,
     } = kind
     else {
         return;
     };
     if *modeled {
         d.extra.insert("modeled".into(), json!(true));
+        // A thread saved before boring (or with it off) keeps refusing a narrow hole when edited.
+        if !*bore {
+            d.extra.insert("bore".into(), json!(false));
+        }
     }
     let options = Options {
         form: *form,
