@@ -892,10 +892,21 @@ pub enum FeatureKind {
         /// Buttress forms: which way the steep flank of the screw's teeth faces.
         #[serde(default, skip_serializing_if = "crate::thread_forms::is_default")]
         steep_flank: crate::thread_forms::SteepFlank,
-        /// A modelled internal thread in a hole too narrow for its teeth bores the hole to the
-        /// size's tap drill first (`thread::bore_to_drill`); false: such a hole is refused.
+        /// An internal thread, modelled or cosmetic, first makes its hole the size's tap drill
+        /// over the threaded length, boring a narrower hole out or filling a wider one in
+        /// (`thread::fit_hole`); false: the hole is left as it is (and a modelled thread refuses
+        /// one its teeth do not fit).
+        #[serde(default, alias = "bore", skip_serializing_if = "std::ops::Not::not")]
+        fit_hole: bool,
+        /// Start from the other end of the face than `from` (or, without it, the end the thread
+        /// would start from) says: its runout, tip and limited length go with it.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        bore: bool,
+        flip: bool,
+        /// A printed part's clearance (modelled threads): every wall of the groove this much
+        /// further into the material, and a hole made the tap drill this much wider each side.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Print clearance")]
+        print_clearance: Option<Expr>,
     },
     /// Ruled loft through profiles of several sketches, in order.
     Loft {

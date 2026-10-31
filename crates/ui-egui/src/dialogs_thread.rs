@@ -218,6 +218,8 @@ const UP_TO_EXTENT: usize = 2;
 const EXTENTS: &[(&str, &str)] = &[("Full", "full"), ("Length", "length"), ("Up to", "up_to")];
 /// The thread's start, its free end: run off it plain, or chamfered (ISO 4753).
 const STARTS_AT: &[&str] = &["None", "Chamfer"];
+/// A printed thread's clearance until one is typed: enough for most FDM printers.
+const PRINT_CLEARANCE: &str = "0.075 mm";
 /// The thread's inner end: a square stop (the groove ends in its own profile) or a fade
 /// (ISO 3508's runout).
 const ENDS_AT: &[&str] = &["thread.end_square", "ui.fade"];
@@ -281,6 +283,14 @@ pub struct Options {
     pub chamfer_angle: String,
     pub chamfer_depth: String,
     pub steep_flank: SteepFlank,
+    /// Make the hole the size's tap drill first (a Thread feature's `fit_hole`); on for a new
+    /// thread, as saved for one reopened.
+    pub fit_hole: bool,
+    /// Start from the other end of the face (a Thread feature's `flip`).
+    pub flip: bool,
+    /// A printed part: cut the groove with `clearance` (a Thread feature's `print_clearance`).
+    pub printed: bool,
+    pub clearance: String,
 }
 
 impl Default for Options {
@@ -295,6 +305,10 @@ impl Default for Options {
             chamfer_angle: String::new(),
             chamfer_depth: String::new(),
             steep_flank: SteepFlank::default(),
+            fit_hole: true,
+            flip: false,
+            printed: false,
+            clearance: PRINT_CLEARANCE.into(),
         }
     }
 }
@@ -420,7 +434,11 @@ pub(crate) fn rows(
     let before = designation.trim().is_empty() || suggested.as_deref() == Some(designation.as_str());
     let mut automatic = before;
     crate::ui_kit::section(ui, "thread_options", "Options", true, |ui| {
-        crate::ui_kit::checkbox_grid(ui, &mut [("Modeled", modeled)], 2);
+        crate::ui_kit::checkbox_grid(ui, &mut [("Modeled", modeled), ("Resize hole to tap drill", &mut o.fit_hole), ("Flip start", &mut o.flip)], 2);
+        crate::ui_kit::checkbox_grid(ui, &mut [("3D printed", &mut o.printed)], 2);
+        if o.printed {
+            enter |= hint_row(ui, "Print clearance", &mut o.clearance, tr("thread.print_clearance_hint"));
+        }
         ui.add_enabled_ui(!designation.trim().is_empty(), |ui| crate::ui_kit::checkbox_grid(ui, &mut [("Automatic size", &mut automatic)], 2));
     });
     reset |= automatic && !before;
@@ -618,6 +636,15 @@ pub(crate) fn put_params(p: &mut Value, length: &str, o: &Options, inputs: &[Sel
     if is_buttress(o.form) && o.steep_flank != SteepFlank::default() {
         p["steep_flank"] = json!(o.steep_flank);
     }
+    if o.fit_hole {
+        p["fit_hole"] = json!(true);
+    }
+    if o.flip {
+        p["flip"] = json!(true);
+    }
+    if o.printed {
+        put(p, &[("print_clearance", o.clearance.as_str())]);
+    }
 }
 
 /// The picked Up To place: a plane's name, or a point on a face.
@@ -653,17 +680,15 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, kind: &FeatureKind) {
         chamfer_angle,
         chamfer_depth,
         steep_flank,
-        bore,
+        fit_hole,
+        flip,
+        print_clearance,
     } = kind
     else {
         return;
     };
     if *modeled {
         d.extra.insert("modeled".into(), json!(true));
-        // A thread saved before boring (or with it off) keeps refusing a narrow hole when edited.
-        if !*bore {
-            d.extra.insert("bore".into(), json!(false));
-        }
     }
     let options = Options {
         form: *form,
@@ -681,6 +706,10 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, kind: &FeatureKind) {
         chamfer_angle: chamfer_angle.as_ref().map(expr).unwrap_or_default(),
         chamfer_depth: chamfer_depth.as_ref().map(expr).unwrap_or_default(),
         steep_flank: *steep_flank,
+        fit_hole: *fit_hole,
+        flip: *flip,
+        printed: print_clearance.is_some(),
+        clearance: print_clearance.as_ref().map(expr).unwrap_or_else(|| PRINT_CLEARANCE.into()),
     };
     if let Some(inp) = d.inputs.first_mut() {
         inp.items = face_sel(s, face.0).into_iter().collect();
