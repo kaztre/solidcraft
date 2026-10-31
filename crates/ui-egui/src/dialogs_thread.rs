@@ -655,12 +655,17 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, kind: &FeatureKind) {
         steep_flank,
         // Kept by the edit itself (`timeline.redefine`), not a dialog option.
         old_auto_size: _,
+        bore,
     } = kind
     else {
         return;
     };
     if *modeled {
         d.extra.insert("modeled".into(), json!(true));
+        // A thread saved before boring (or with it off) keeps refusing a narrow hole when edited.
+        if !*bore {
+            d.extra.insert("bore".into(), json!(false));
+        }
     }
     let options = Options {
         form: *form,

@@ -382,13 +382,15 @@ fn a_modelled_thread_that_would_cut_nothing_narrows_the_hole_instead() {
 }
 
 /// Issue 2688: an M8 modelled thread in a 6 mm hole (narrower than its 6.65 mm minor diameter)
-/// was refused as "the face is too far from the thread's diameter". It says what is wrong and
-/// what to drill, as a hole that is too wide does; and the same for a shaft that is too thick.
+/// was refused as "the face is too far from the thread's diameter". Without boring (`bore:
+/// false`, as every design saved before it), it says what is wrong and what to drill, as a hole
+/// that is too wide does; and the same for a shaft that is too thick.
 #[test]
 fn a_hole_too_narrow_or_a_shaft_too_thick_says_which_and_what_fits() {
     let mut s = hex_nut(6.0);
     let before = volume(&mut s, "Nut");
-    let e = s.execute("solid.thread", &json!({"face": [3.0, 0, 2], "designation": "M8", "modeled": true})).err().map(|e| e.to_string());
+    let e =
+        s.execute("solid.thread", &json!({"face": [3.0, 0, 2], "designation": "M8", "modeled": true, "bore": false})).err().map(|e| e.to_string());
     let e = e.unwrap_or_default();
     assert!(e.contains("this 6 mm hole is too narrow for a modelled M8 thread") && e.contains("drill 6.8 mm for M8"), "{e}");
     assert!(!e.contains("too far"), "{e}");
@@ -400,6 +402,32 @@ fn a_hole_too_narrow_or_a_shaft_too_thick_says_which_and_what_fits() {
     let e = s.execute("solid.thread", &json!({"face": [4.5, 0, 5], "designation": "M8", "modeled": true})).err().map(|e| e.to_string());
     let e = e.unwrap_or_default();
     assert!(e.contains("this 9 mm shaft is too thick for a modelled M8 thread") && e.contains("make the shaft 8 mm for M8"), "{e}");
+}
+
+/// A modelled thread in a hole too narrow for its teeth bores the hole to the size's tap drill
+/// first (`bore`, on for new modelled threads): an M8 in a 6 mm hole is the part an M8 cut in a
+/// 6.8 mm hole is, and its feature says what was bored. A hole the thread fits is left alone.
+#[test]
+fn a_hole_too_narrow_is_bored_to_the_tap_drill_and_the_feature_says_so() {
+    let threaded = |hole: f64, bore: bool| {
+        let mut s = hex_nut(hole);
+        let made = run(&mut s, "solid.thread", json!({"face": [hole / 2.0, 0, 2], "designation": "M8", "modeled": true, "bore": bore}));
+        let id = made["feature"].as_u64().unwrap();
+        let warning = s.model.result(id).and_then(|r| r.warning.clone());
+        (volume(&mut s, "Nut"), warning)
+    };
+    let (narrow, said) = threaded(6.0, true);
+    let said = said.unwrap_or_default();
+    assert!(said.contains("the 6 mm hole was bored to 6.8 mm, the tap drill for M8"), "{said}");
+    let (drilled, none) = threaded(6.8, true);
+    assert!(none.is_none(), "a hole the thread fits is not bored: {none:?}");
+    assert!((narrow - drilled).abs() < 1e-4 * drilled, "bored {narrow} against drilled {drilled}");
+    let (unbored, _) = threaded(6.8, false);
+    assert!((unbored - drilled).abs() < 1e-9 * drilled, "bore changes nothing in a hole the thread fits");
+    // A cosmetic thread changes no hole.
+    let mut s = hex_nut(6.0);
+    let e = s.execute("solid.thread", &json!({"face": [3.0, 0, 2], "designation": "M8", "bore": true})).unwrap_err().to_string();
+    assert!(e.contains("`bore` goes with a modelled thread"), "{e}");
 }
 
 /// The limit is a quarter of the basic depth 5H/8: a hole up to 4.78 mm for M5 (4.86 mm for

@@ -717,6 +717,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         chamfer_depth,
         steep_flank,
         old_auto_size,
+        bore,
     } = &f.kind
     else {
         return Err(DocError::Invalid("not a thread".into()));
@@ -749,10 +750,13 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         return Err(DocError::Invalid("a runout is cut only on a modelled thread".into()));
     }
     let ask = ThreadAsk { ease_out: runout(vals, ease_out)?, ..ask };
-    let on = thread_on(st, f.id, face.0, &ask)?;
+    let mut on = thread_on(st, f.id, face.0, &ask)?;
     if !*modeled {
         st.threads.push(on.info);
         return Ok(());
+    }
+    if *bore {
+        bore_to_drill(st, &mut on, warning)?;
     }
     let angle = chamfer_angle.as_deref().map(|e| val(vals, e, Kind::Angle)).transpose()?;
     let depth = chamfer_depth.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?;
@@ -769,6 +773,66 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         });
     }
     cut(st, on, (*tip, angle, depth))
+}
+
+/// A hole too narrow for the thread's groove, the test [`thread_grooves`] refuses it by: the
+/// groove would be wider than a pitch, its teeth filling the hole. A taper thread's crests follow
+/// its own cone, so it never counts here.
+fn too_narrow(t: &ThreadInfo, radius: f64) -> bool {
+    if !t.internal || t.form.is_taper() {
+        return false;
+    }
+    let p = t.pitch;
+    let g = t.form.groove(t.major_diameter, p, true);
+    g.width(p, radius.min(g.crest_r) - 0.1 * p) >= p * 0.98
+}
+
+/// Widens a hole too narrow for its modelled thread to the size's tap drill over the threaded
+/// length, as a drill would before the tap (a Thread feature's `bore`): a ring from inside the
+/// hole out to the drill's radius, revolved about the axis and cut from the body. Past a free end
+/// it runs a pitch out into the air; at a closed end or inside the face it stops a quarter pitch
+/// short, clear of a blind hole's bottom (the groove stops short of it too). A hole the thread
+/// fits is left as it is. Says what it bored in `warning`.
+fn bore_to_drill(st: &mut ModelState, on: &mut ThreadOn, warning: &mut Option<String>) -> Result<()> {
+    let t = &on.info;
+    let radius = on.cyl.radius;
+    let p = t.pitch;
+    let r_drill = t.form.drill(t.major_diameter, p) / 2.0;
+    if !too_narrow(t, radius) || !(r_drill > radius) {
+        return Ok(());
+    }
+    let reach = |side: usize| if on.ends.get(side) == Some(&End::Free) { p } else { -0.25 * p };
+    let (z0, z1) = (t.start - reach(0), t.end + reach(1));
+    if !(z1 - z0 > 1e-6) {
+        return Ok(());
+    }
+    let k = *t.axis;
+    let u = k.cross(if k.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) });
+    let u = u.normalized().ok_or_else(|| DocError::Invalid("thread axis".into()))?;
+    // In the plane: x radial, y along the axis from its point.
+    let plane = Plane { origin: t.axis_point, x: u, y: k };
+    let r_in = 0.5 * radius;
+    let pts = [Vec2::new(r_in, z0), Vec2::new(r_drill, z0), Vec2::new(r_drill, z1), Vec2::new(r_in, z1)];
+    let region = Region2 { outer: solidcraft_geom::Loop2::polygon(&pts), holes: Vec::new() };
+    let ring = kernel::revolve(&plane, &[region], Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0), std::f64::consts::TAU)?
+        .pop()
+        .ok_or_else(|| DocError::Invalid("bore".into()))?;
+    let i = st.bodies.iter().position(|b| b.name == t.body).ok_or_else(|| DocError::Invalid("threaded body".into()))?;
+    let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+    let input = mb.traced();
+    let faces = ring.face_count();
+    let cut = kernel::boolean(&input.body, &ring, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("the bore removed everything".into()))?;
+    let unnamed = crate::lineage::Lineage::unnamed_faces(faces);
+    let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&cut, &[&l, &unnamed]));
+    append_warning(
+        warning,
+        format!("the {} mm hole was bored to {} mm, the tap drill for {}", show_mm(2.0 * radius), show_mm(2.0 * r_drill), t.designation),
+    );
+    if let Some(slot) = st.bodies.get_mut(i) {
+        *slot = ModelBody::traced_new(mb.name, Traced { body: cut, lineage }, mb.feature);
+    }
+    on.cyl.radius = r_drill;
+    Ok(())
 }
 
 /// A runout as (mm, pitches): ISO 3508's standard 2.5 P and short 1.25 P, or a length.

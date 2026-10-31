@@ -963,6 +963,10 @@ pub enum FeatureKind {
         /// was left to the tap drill: a 12 mm hole stays M14 there. New threads leave it off.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         old_auto_size: bool,
+        /// A modelled internal thread in a hole too narrow for its teeth bores the hole to the
+        /// size's tap drill first (`thread::bore_to_drill`); false: such a hole is refused.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        bore: bool,
     },
     /// Ruled loft through profiles of several sketches, in order.
     Loft {
