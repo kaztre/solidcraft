@@ -720,6 +720,17 @@ fn main() -> eframe::Result {
             _ => files.push(a),
         }
     }
+    // What the app logs goes to a file a bug report reads (solidcraft_engine::session_log).
+    if solidcraft_engine::session_log::default_dir().and_then(|d| solidcraft_engine::session_log::install(&d)).is_some() {
+        log::info!(
+            "SolidCraft {} ({}, built {}) on {} {}",
+            solidcraft_ui_egui::help::VERSION,
+            solidcraft_ui_egui::help::COMMIT,
+            solidcraft_ui_egui::help::BUILD_DATE,
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        );
+    }
     // Settings that don't read are moved aside; launches that never got a window are counted,
     // and after a few in a row this one starts in safe mode (docs/book/src/guide/troubleshooting.md).
     let mut notes: Vec<String> = Vec::new();
@@ -740,6 +751,9 @@ fn main() -> eframe::Result {
     }
     if safe_mode {
         notes.push("Safe mode: default settings (yours are kept for the next normal start), no recovery offer, software rendering.".into());
+    }
+    for note in &notes {
+        log::warn!("startup: {note}");
     }
     let fallback_note = std::env::var(startup::FALLBACK_NOTE_ENV).ok().map(|s| s.chars().take(4096).collect::<String>());
     if let Some(note) = &fallback_note {
