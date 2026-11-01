@@ -71,6 +71,9 @@ Give new testers that page's link. The fixed names always fetch the newest build
 - Windows: `https://github.com/kaztre/solidcraft/releases/latest/download/solidcraft-windows-x64.msi`
 - Linux: `https://github.com/kaztre/solidcraft/releases/latest/download/solidcraft-linux-x86_64.AppImage`
 
+The Linux packages are built on Ubuntu 24.04 (SMLib's Linux library needs glibc 2.38 or newer), so
+they run on Ubuntu 24.04, Fedora 40, Debian 13 or newer, not on older distributions.
+
 The builds are not code-signed. On macOS the first open needs right-click ▸ Open (or System
 Settings ▸ Privacy & Security ▸ Open Anyway); on Windows SmartScreen needs More info ▸ Run anyway.
 
