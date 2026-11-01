@@ -76,6 +76,20 @@ fn quarters([a0, a1]: [f64; 2], reach: f64) -> Option<(f64, usize)> {
 /// face's seam uses lie a period apart), anything less the quarters it needs ([`quarters`], ends
 /// within `reach` of a quarter's end on it).
 fn face_quarters(a: [f64; 2], reach: f64) -> Option<((f64, usize), [f64; 2])> {
+    if a[1] - a[0] > TAU + HELIX_SLACK {
+        // A helical strip of more than a turn: the quarters it spans, its form covering the
+        // surface more than once (its face does not: it moves along the axis as it goes round).
+        let q0 = quarter_of(a[0]);
+        let n = ((a[1] / FRAC_PI_2 - SLACK).ceil() - q0).max(1.0);
+        // Whole turns would close the form on itself, a surface a kernel takes as closed round
+        // its axis (and gives a seam the face does not have): it runs on a quarter.
+        let n = if n % 4.0 == 0.0 { n + 1.0 } else { n };
+        if !(a[0].is_finite() && a[1].is_finite() && n <= 4.0 * HELIX_TURNS + 1.0) {
+            return None;
+        }
+        let grid = (q0, n as usize);
+        return Some((grid, params(a, grid)));
+    }
     if a[1] - a[0] >= TAU * (1.0 - 1e-9) {
         // A turn starting within `reach` of a quarter line starts on it, as an end of less than a
         // turn does ([`quarters`]). Its boundary there (a thread's band: a line along the axis,
@@ -555,6 +569,13 @@ pub fn edge_on<'a>(
 /// Points per edge along a loop taken for a face's extent.
 const EXTENT_POINTS: usize = 32;
 
+/// The most turns a helical face (a thread's flank) spans about its axis.
+const HELIX_TURNS: f64 = 64.0;
+
+/// How far past a turn a loop must run to bound a helical strip (radians): a band's loop, round
+/// and back along its seam, spans a turn to within its edges' gaps.
+const HELIX_SLACK: f64 = 1e-3;
+
 /// The largest value of `f` on `[a, b]`, where it rises to one peak and falls (golden section, to
 /// rounding; the ends count).
 fn golden_max(f: &dyn Fn(f64) -> f64, a: f64, b: f64) -> f64 {
@@ -590,6 +611,9 @@ pub fn extent(label: &Surface, loops: &[Vec<(&Curve, [f64; 2], bool)>]) -> Optio
     let eval = super::eval::SurfaceEval::new(label).ok()?;
     let period = eval.domain().period;
     let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+    // The turns a helical face's box may span about a cylinder's or cone's axis ([`HELIX_TURNS`]).
+    let mut turns = [1.0f64; 2];
+    let winds = matches!(label, Surface::Cylinder { .. } | Surface::Cone { .. });
     for l in loops {
         // A loop is unwrapped from its own first point, so it can come out whole periods away
         // from the loops before it (a hole beside the seam projects to the seam's other side),
@@ -687,6 +711,15 @@ pub fn extent(label: &Surface, loops: &[Vec<(&Curve, [f64; 2], bool)>]) -> Optio
                 }
             }
         }
+        // A loop round a cylinder or cone that runs on past a turn and comes back without going
+        // round (a thread's flank: a helix down several turns, a short arc, a helix back up and an
+        // arc) bounds a helical strip, whose box is the turns it spans.
+        if winds && let (Some(Some(per)), Some(f), Some(e)) = (period.first(), first, last) {
+            let span = l_hi[0] - l_lo[0];
+            if span > *per + HELIX_SLACK && (e[0] - f[0]).abs() < 0.5 * per {
+                turns[0] = turns[0].max((span / per).ceil()).min(HELIX_TURNS);
+            }
+        }
         for d in 0..2 {
             if !(l_lo[d] <= l_hi[d]) {
                 continue;
@@ -705,11 +738,11 @@ pub fn extent(label: &Surface, loops: &[Vec<(&Curve, [f64; 2], bool)>]) -> Optio
             hi[d] = hi[d].max(l_hi[d] + shift);
         }
     }
-    // At most one turn round a periodic direction; a boundary that never goes round it (a face
-    // bounded by its seam alone) covers the whole turn from there.
+    // At most one turn round a periodic direction (a helical strip's turns); a boundary that never
+    // goes round it (a face bounded by its seam alone) covers the whole turn from there.
     for d in 0..2 {
         if let Some(Some(per)) = period.get(d) {
-            hi[d] = if hi[d] - lo[d] <= 1e-9 * per { lo[d] + per } else { hi[d].min(lo[d] + per) };
+            hi[d] = if hi[d] - lo[d] <= 1e-9 * per { lo[d] + per } else { hi[d].min(lo[d] + turns[d] * per) };
         }
     }
     (lo[0] < hi[0] && lo[1] < hi[1]).then_some([[lo[0], hi[0]], [lo[1], hi[1]]])

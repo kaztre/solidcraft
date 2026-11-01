@@ -179,6 +179,43 @@ fn numbering(record: &solidcraft_geom::brep::Brep, brep: &solidcraft_smlib::Brep
     }
 }
 
+/// Where SMLib's faces of `brep` (imported from `record`) are in the record's order (an empty
+/// list: the same) when its edges are not numbered as the record's: an edge that two faces each
+/// use twice, two pins touching along the line both their seams run on as a file may give them,
+/// is two edges in SMLib. Its faces are the record's when its canonical export lists them as the
+/// record does: the same vertices where the record's are, and each face's loops round the same
+/// vertices. `None` otherwise.
+pub(crate) fn smlib_faces_ordered(record: &solidcraft_geom::brep::Brep, brep: &solidcraft_smlib::Brep) -> Option<Vec<usize>> {
+    use solidcraft_geom::brep::{Brep, Face, Loop};
+    let (back, order) = brep.to_native_ordered().ok()?;
+    if back.faces.len() != record.faces.len() || back.vertices.len() != record.vertices.len() {
+        return None;
+    }
+    let at_same_place = record.vertices.iter().zip(&back.vertices).all(|(x, y)| {
+        let d = (0..3).map(|k| (x.point[k] - y.point[k]).powi(2)).sum::<f64>().sqrt();
+        d <= x.tolerance + y.tolerance + record.tolerance + back.tolerance
+    });
+    // Each loop's corners: the vertex each of its uses starts at, in order of number.
+    let corners = |r: &Brep, f: &Face| -> Option<Vec<Vec<u32>>> {
+        f.loops
+            .iter()
+            .map(|l| match l {
+                Loop::Edges { edges } => {
+                    let mut v = edges
+                        .iter()
+                        .map(|u| r.edges.get(u.edge as usize).map(|e| e.vertices[if u.forward { 0 } else { 1 }]))
+                        .collect::<Option<Vec<u32>>>()?;
+                    v.sort_unstable();
+                    Some(v)
+                }
+                Loop::Vertex { vertex } => Some(vec![*vertex]),
+            })
+            .collect()
+    };
+    let alike = record.faces.iter().zip(&back.faces).all(|(a, b)| corners(record, a).is_some_and(|x| corners(&back, b) == Some(x)));
+    (at_same_place && alike).then_some(order.faces)
+}
+
 /// The canonical record `back` with its faces and edges in SMLib's own order (`order`: where
 /// SMLib's face and edge `i` are in `back`), each loop naming its edges by SMLib's numbers.
 /// `None` where `order` is not a renumbering of `back`'s faces and edges (an edge split into
