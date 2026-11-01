@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use super::{PartsSearchParams, PartsSearchReply};
+use super::{PartsConvertParams, PartsSearchParams, PartsSearchReply};
 use crate::Session;
 use crate::schema::tests::{assert_keys, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
@@ -8,6 +8,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 #[test]
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<PartsSearchParams>(), &["folder", "limit", "query"]);
+    assert_keys(input_schema_for::<PartsConvertParams>(), &["description", "name", "organization", "overwrite", "part_number", "path", "stand_up"]);
 }
 
 #[test]

@@ -50,6 +50,9 @@ pub struct Entry {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub revision: Option<String>,
+    /// The file's contents are on this computer: false for a file a synced folder (iCloud Drive)
+    /// keeps only in the cloud until it is opened, which reading would download.
+    pub local: bool,
 }
 
 /// A scanned library folder.
@@ -137,7 +140,9 @@ pub fn scan(root: &str) -> Result<Library> {
             if here.get(&stem.to_lowercase()).is_some_and(|(best, _)| *best <= order) {
                 continue;
             }
-            let bytes = item.metadata().map(|m| m.len()).unwrap_or(0);
+            let meta = item.metadata().ok();
+            let bytes = meta.as_ref().map_or(0, |m| m.len());
+            let local = meta.as_ref().is_none_or(is_local);
             let entry = Entry {
                 path: inner,
                 name: stem.to_string(),
@@ -148,6 +153,7 @@ pub fn scan(root: &str) -> Result<Library> {
                 part_number: None,
                 description: None,
                 revision: None,
+                local,
             };
             here.insert(stem.to_lowercase(), (order, entry));
         }
@@ -211,6 +217,46 @@ fn design_properties(path: &Path) -> Option<Map<String, Value>> {
         return None;
     }
     crate::DesignContainerReader::new(file).ok()?.properties()
+}
+
+/// Whether a file's contents are on this computer. macOS marks a file that iCloud Drive keeps
+/// only in the cloud as dataless; elsewhere every file counts as here.
+fn is_local(meta: &std::fs::Metadata) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::macos::fs::MetadataExt;
+        const SF_DATALESS: u32 = 0x4000_0000;
+        meta.st_flags() & SF_DATALESS == 0
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = meta;
+        true
+    }
+}
+
+/// A vendor part number in a part's name or file name, such as `BR-102909` in
+/// `M10_TO_M14_BULKHEAD_ADAPTER_BR-102909`: one to five letters, a hyphen and at least three
+/// digits, the first one found (the name before the file name).
+pub fn guess_part_number(entry: &Entry) -> Option<String> {
+    let file = entry.path.rsplit('/').next().unwrap_or("");
+    [entry.name.as_str(), file].into_iter().find_map(|text| {
+        let b = text.as_bytes();
+        (0..b.len()).find_map(|start| {
+            // A code starts a word: not straight after another letter or digit.
+            if start > 0 && b[start - 1].is_ascii_alphanumeric() {
+                return None;
+            }
+            let letters = b[start..].iter().take_while(|c| c.is_ascii_alphabetic()).count();
+            let digits_at = start + letters + 1;
+            if !(1..=5).contains(&letters) || b.get(start + letters) != Some(&b'-') {
+                return None;
+            }
+            let digits = b.get(digits_at..)?.iter().take_while(|c| c.is_ascii_digit()).count();
+            let end = digits_at + digits;
+            (digits >= 3 && b.get(end).is_none_or(|c| !c.is_ascii_alphanumeric())).then(|| text[start..end].to_ascii_uppercase())
+        })
+    })
 }
 
 /// Lower-case, with `_` and `/` as spaces, so "t200 thruster" finds `T200_THRUSTER`.
@@ -355,6 +401,29 @@ mod tests {
         );
         let (found, _) = search(&library, "br-102512", 5);
         assert_eq!(found.len(), 1, "the file's own name is still searched");
+    }
+
+    #[test]
+    fn a_vendor_part_number_is_found_in_the_name_or_the_file_name() {
+        let entry = |name: &str, path: &str| Entry {
+            path: path.into(),
+            name: name.into(),
+            folder: String::new(),
+            kind: Kind::Cad,
+            format: "step".into(),
+            bytes: 0,
+            part_number: None,
+            description: None,
+            revision: None,
+            local: true,
+        };
+        let guess = |name: &str, path: &str| guess_part_number(&entry(name, path));
+        assert_eq!(guess("M10 TO M14 BULKHEAD ADAPTER BR-102909", "A/BR-102512_RevA.STEP").as_deref(), Some("BR-102909"), "the name first");
+        assert_eq!(guess("Adapter", "A/BR-102512_RevA.STEP").as_deref(), Some("BR-102512"));
+        assert_eq!(guess("PUB-BR-101303-004_RevC", "x.step").as_deref(), Some("BR-101303"), "the letters just before the digits");
+        assert_eq!(guess("wl-m14-nut", "wl-m14-nut.step"), None, "two digits are not a part number");
+        assert_eq!(guess("T200", "T200.STEP"), None);
+        assert_eq!(guess("ABCDEF-12345", "x.step"), None, "more than five letters");
     }
 
     #[test]
