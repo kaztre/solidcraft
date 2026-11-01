@@ -54,7 +54,9 @@ jobs:
   # The app icon in every size, for the Windows job.
   icons:
     needs: version
-    runs-on: ubuntu-22.04
+    # SMLib's Linux library needs glibc >= 2.38 (__isoc23_sscanf and friends), so the Linux
+    # jobs run on 24.04, not release.yml's 22.04; the packages then need glibc >= 2.39.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@stable
@@ -82,8 +84,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: x86_64, runner: ubuntu-22.04, deb: amd64 }
-          - { arch: aarch64, runner: ubuntu-22.04-arm, deb: arm64 }
+          - { arch: x86_64, runner: ubuntu-24.04, deb: amd64 }
+          - { arch: aarch64, runner: ubuntu-24.04-arm, deb: arm64 }
     env:
       SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
       SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
