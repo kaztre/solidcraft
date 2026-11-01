@@ -1,7 +1,7 @@
 use super::*;
 use crate::prelude::*;
 use solidcore_record::brep::*;
-use std::f64::consts::{FRAC_PI_2, TAU};
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 fn segment(a: f64, b: f64) -> Curve2 {
     Curve2::Spline { knots: vec![a, a, b, b], points: vec![[a, 0.], [b, 1.]] }
@@ -744,4 +744,26 @@ fn a_form_on_arcs_of_its_own_is_the_surface_and_does_not_close_around_an_open_fa
     let (whole, _) = form::surface_on_own_arcs(&torus, [[0.3, 1.2], [-FRAC_PI_2, -FRAC_PI_2 + TAU]], tol).unwrap();
     assert_eq!(tube(&whole), (-1.0, 3.0));
     assert!(form::surface_on_own_arcs(&Surface::Plane { origin: [0.; 3], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] }, label, tol).is_none());
+}
+
+/// A whole turn whose start lies within its tolerance of a quarter line has its form from that
+/// line, as an end of less than a turn does: a thread's band (a line along the axis, a helix
+/// round, a line and a helix back) whose edges lie a hair either side of the line's angle had
+/// its form from the quarter before, whose seam cut across both helices, and the importer left
+/// the band out ("outer loop runs clockwise", 174 faces of one assembly). A start further from
+/// the line keeps the quarter it is in.
+#[test]
+fn a_whole_turn_starting_a_hair_before_a_quarter_line_has_its_form_from_the_line() {
+    let r = 2.5;
+    let cylinder = Surface::Cylinder { frame: Frame { origin: [0.; 3], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] }, radius: r };
+    let turn = |start: f64| {
+        let (_, [u, _]) = form::surface_within(&cylinder, [[start, start + TAU + 1e-3], [0., 1.]], 0.01).expect("a form");
+        u
+    };
+    // 0.0008 rad before 180 degrees: 0.002 mm round the surface, within 0.01 mm.
+    let u = turn(PI - 8e-4);
+    assert!((u[0] - 2.0).abs() < 1e-12 && (u[1] - 6.0).abs() < 1e-12, "from the line at 180 degrees: {u:?}");
+    // 0.3 rad before it, 0.75 mm: from the quarter it starts in.
+    let u = turn(PI - 0.3);
+    assert!((u[0] - 1.0).abs() < 1e-12, "from the quarter before: {u:?}");
 }
