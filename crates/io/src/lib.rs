@@ -23,6 +23,7 @@ mod legacy_dir;
 mod mutate;
 mod native_cad;
 pub use native_cad::{NATIVE_CAD_EXTS, is_native_cad_path, native_cad_to_step};
+pub mod parts_library;
 pub mod safe_write;
 mod sketch2d;
 mod svg;
