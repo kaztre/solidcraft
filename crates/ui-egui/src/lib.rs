@@ -463,6 +463,8 @@ pub struct SolveApp {
     pub bom: Option<bom_panel::BomPanel>,
     /// The Parts Library window, when open.
     pub parts_library: Option<parts_library::PartsLibrary>,
+    /// The threads the Parts Library started, which outlive the window.
+    parts_workers: std::sync::Arc<parts_library::Workers>,
     material_card_review: Option<material_card_review::ReviewWindow>,
     /// Context menus, rename box and Properties window.
     pub menu: context_menu::MenuState,
@@ -640,6 +642,7 @@ impl Drop for SolveApp {
     fn drop(&mut self) {
         #[cfg(not(target_arch = "wasm32"))]
         home::finish_pictures(&mut self.home, std::time::Duration::from_secs(10));
+        self.parts_workers.finish(std::time::Duration::from_secs(10));
     }
 }
 
@@ -678,6 +681,7 @@ impl SolveApp {
             design_properties: None,
             bom: None,
             parts_library: None,
+            parts_workers: Default::default(),
             material_card_review: None,
             menu: context_menu::MenuState::default(),
             gesture: mouse_gesture::State::default(),

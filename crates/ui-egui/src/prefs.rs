@@ -754,8 +754,12 @@ preference_settings! {
     save_mesh_quality: String = "standard".into();
     /// The programs the user added to the slicer list, newest first.
     custom_slicers: Vec<String> = Vec::new();
-    /// The Parts Library window's folder (docs/parts-library.md); empty until one is chosen.
+    /// The Parts Library window's libraries (docs/parts-library.md): a name and a folder each.
+    parts_libraries: Vec<crate::parts_library::LibraryRef> = Vec::new();
+    /// The first Parts Library's one folder; the window moves it into `parts_libraries`.
     parts_library_folder: String = String::new();
+    /// Converting a STEP or IGES part stands up a file exported with Y up (SolidWorks).
+    parts_library_stand_up: bool = true;
     /// AI features (docs/agent-chat.md): the master switch. Off: no AI button, shortcut, menu
     /// entry or panel, and nothing is looked for or started.
     ai_features: bool = true, PAGE_AI;
