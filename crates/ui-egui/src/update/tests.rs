@@ -27,6 +27,44 @@ fn nightlies_count_as_the_release_they_follow() {
     assert!(is_newer("v0.10.0", "0.9.0-nightly.20261014.36.1"));
 }
 
+#[test]
+fn a_forks_test_builds_are_offered_to_each_other() {
+    // fork-release.yml numbers test builds in order; the next one is offered.
+    assert!(is_newer("v0.24.0-test.8", "0.24.0-test.7"));
+    assert!(is_newer("v0.24.0-test.10", "0.24.0-test.9"), "numbers compare as numbers");
+    assert!(is_newer("v0.25.0-test.11", "0.24.0-test.10"), "after a rebase onto a newer version");
+    assert!(!is_newer("v0.24.0-test.7", "0.24.0-test.7"));
+    assert!(!is_newer("v0.24.0-test.6", "0.24.0-test.7"));
+    // Only to test builds: a stable or nightly install is never offered one.
+    assert!(!is_newer("v0.25.0-test.1", "0.24.0"));
+    assert!(!is_newer("v0.25.0-test.1", "0.24.0-nightly.20261101.1.1"));
+    // A stable release newer than a test build still is.
+    assert!(is_newer("v0.25.0", "0.24.0-test.7"));
+}
+
+#[test]
+fn a_fork_build_checks_the_forks_releases() {
+    let fork = Some("kaztre/solidcraft");
+    assert!(is_release_url_of("https://github.com/kaztre/solidcraft/releases/tag/v0.24.0-test.1", fork));
+    assert!(is_release_url_of("https://github.com/tangency-labs/solidcraft/releases/tag/v0.24.0", fork));
+    assert!(!is_release_url_of("https://github.com/kaztre/solidcraft/releases/x", None));
+    assert!(!is_release_url_of("https://github.com/kaztre/solidcraft-evil/releases/x", fork));
+    assert!(!is_release_url_of("https://github.com/kaztre/solidcraft/issues/1", fork));
+    assert_eq!(release_notes_url_of("0.24.0-test.3", true, fork), "https://github.com/kaztre/solidcraft/releases/tag/v0.24.0-test.3");
+    assert_eq!(release_notes_url_of("0.24.0", false, fork), "https://github.com/kaztre/solidcraft/releases");
+    // A malformed repository name is ignored, never put in a URL.
+    for bad in ["", "kaztre", "kaztre/solidcraft/x", "../x", "kaztre/..", "kaz tre/solidcraft", "kaztre/sc?x=1"] {
+        assert!(!valid_repo(bad), "{bad:?}");
+        assert!(!is_release_url_of("https://github.com/kaztre/solidcraft/releases/x", Some(bad)), "{bad:?}");
+        assert_eq!(release_notes_url_of("0.24.0", false, Some(bad)), "https://github.com/tangency-labs/solidcraft/releases");
+    }
+    // Without a fork (every upstream build) the project's own repository is asked.
+    if fork_repo().is_none() {
+        assert_eq!(latest_api(), "https://api.github.com/repos/bherbruck/solidcraft/releases/latest");
+        assert_eq!(releases_page(), "https://github.com/bherbruck/solidcraft/releases/latest");
+    }
+}
+
 fn probe(os: &str, release: bool, env: &[(&str, &str)], exe: &str, files: &[&str]) -> InstallKind {
     let env: BTreeMap<String, String> = env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
     let files: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
@@ -218,7 +256,7 @@ fn release_answers_are_checked() {
         .as_bytes(),
     )
     .unwrap();
-    assert_eq!(r.page, RELEASES_PAGE);
+    assert_eq!(r.page, releases_page());
     assert_eq!(r.assets.len(), 1);
     assert_eq!(r.name, "SolidCraft v1.0.0");
     // Huge notes are cut (on a character boundary).
@@ -510,7 +548,7 @@ fn releases_under_either_owner_are_accepted() {
     // Any other owner, repository, host or scheme is dropped.
     for owner in ["evil/solidcraft", "tangency-labs/solidcraft-evil", "tangency-labs.evil/solidcraft", "bherbruck/other"] {
         let r = parse(owner);
-        assert_eq!(r.page, RELEASES_PAGE, "{owner}");
+        assert_eq!(r.page, releases_page(), "{owner}");
         assert!(r.assets.is_empty(), "{owner}");
     }
     assert!(!is_release_url("http://github.com/tangency-labs/solidcraft/releases/x"));
