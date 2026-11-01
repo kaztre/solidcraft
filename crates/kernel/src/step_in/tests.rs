@@ -886,6 +886,21 @@ fn later_instances_show_the_first_instances_mesh_placed() {
 /// A body knows the product that holds it and the assembly occurrence it is, next to the name of
 /// its solid: a caller can name bodies after the part or the instance when the solids carry the
 /// name of the last feature that made them (`Cut-Extrude3`), which says nothing about the part.
+/// A warning names the part a solid is in: CAD systems name every part's solid `Body1`, so
+/// "solid 'Body1': imported as an open body" did not say which of an assembly's parts it was.
+/// A file without products names only the solid, as before.
+#[test]
+fn a_warning_names_the_part_its_solid_is_in() {
+    use crate::step_out::{ExportBody, ExportProduct, StepHeader, step_export_products};
+    let tray = crate::surfaces::remove_faces(&box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 4.0)).unwrap(), &[0]).unwrap();
+    let products = vec![
+        ExportProduct { name: "Assembly".into(), bodies: Vec::new(), children: vec![(1, IDENTITY, "Tray-1".into())] },
+        ExportProduct { name: "Lid Tray".into(), bodies: vec![ExportBody { name: "Body1".into(), body: &tray, color: None }], children: Vec::new() },
+    ];
+    let imp = step_import(&step_export_products(&products, 0, &StepHeader::default()).unwrap()).unwrap();
+    assert!(imp.warnings.iter().any(|w| w.starts_with("solid 'Body1' of 'Lid Tray': imported as an open body")), "{:?}", imp.warnings);
+}
+
 #[test]
 fn bodies_know_their_product_and_instance() {
     use crate::step_out::{ExportBody, ExportProduct, StepHeader, step_export_products};

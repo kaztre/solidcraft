@@ -77,7 +77,13 @@ fn quarters([a0, a1]: [f64; 2], reach: f64) -> Option<(f64, usize)> {
 /// within `reach` of a quarter's end on it).
 fn face_quarters(a: [f64; 2], reach: f64) -> Option<((f64, usize), [f64; 2])> {
     if a[1] - a[0] >= TAU * (1.0 - 1e-9) {
-        let q0 = quarter_of(a[0]);
+        // A turn starting within `reach` of a quarter line starts on it, as an end of less than a
+        // turn does ([`quarters`]). Its boundary there (a thread's band: a line along the axis,
+        // a helix round, a line and a helix back, its edges a hair either side of the line's
+        // angle) is then the form's seam; from the quarter before, the seam cut across both
+        // helices and their pcurves jumped a period half way, so the face was left out.
+        let line = (a[0] / FRAC_PI_2).round() * FRAC_PI_2;
+        let q0 = quarter_of(if (a[0] - line).abs() <= reach { line } else { a[0] });
         return Some(((q0, 4), [q0, q0 + 4.0]));
     }
     let grid = quarters(a, reach)?;

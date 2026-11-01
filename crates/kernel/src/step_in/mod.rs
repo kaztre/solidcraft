@@ -158,6 +158,9 @@ struct Noted {
     times: usize,
 }
 
+/// The part a solid is in when the file names none (or has no products).
+const UNNAMED_PART: &str = "Import";
+
 /// A solid the walk found, converted later.
 struct Planned {
     item: u64,
@@ -280,6 +283,9 @@ struct Reader {
     /// Items the file converts exactly once (see `index`): keeping their parts would hold a
     /// second copy of the whole import for nothing.
     once: HashSet<u64>,
+    /// The part (product) each solid item is first placed as, to name it in warnings: a CAD
+    /// system names a part's solid `Body1`, `Body2`… in every part alike.
+    part_of: HashMap<u64, String>,
     /// An item placed more than once: its first instance's display, shared by every instance
     /// (with the placement that first instance had), so the part is meshed once.
     shown: HashMap<u64, (Arc<crate::body::SharedDisplay>, M4)>,
@@ -331,6 +337,7 @@ impl Reader {
             opacity: HashMap::new(),
             unreadable: HashMap::new(),
             once: HashSet::new(),
+            part_of: HashMap::new(),
             shown: HashMap::new(),
             uses: HashMap::new(),
             oriented: HashMap::new(),
@@ -664,9 +671,16 @@ impl Reader {
         mapped.map(|rep| self.rep_closure(&[rep])).unwrap_or_default()
     }
 
+    /// How warnings name a solid: its own name, and the part it is in where that says more.
     fn label(&self, item: u64) -> String {
         let name = self.part_name(item);
-        if name.is_empty() { format!("solid #{item}") } else { format!("solid '{name}'") }
+        let part = self.part_of.get(&item).map(|p| p.trim()).filter(|p| !p.is_empty() && *p != name);
+        match (name.is_empty(), part) {
+            (true, None) => format!("solid #{item}"),
+            (true, Some(p)) => format!("solid #{item} of '{p}'"),
+            (false, None) => format!("solid '{name}'"),
+            (false, Some(p)) => format!("solid '{name}' of '{p}'"),
+        }
     }
 
     /// Bodies of a representation's items (following mapped items), placed by `m`.
@@ -728,6 +742,9 @@ impl Reader {
                                 }
                             }
                             out.push(self.plan.len());
+                            if !product.is_empty() && product != UNNAMED_PART {
+                                self.part_of.entry(piece).or_insert_with(|| product.to_string());
+                            }
                             self.plan.push(Planned { item: piece, units: u, batch: id });
                             *self.uses.entry(piece).or_default() += 1;
                         }
@@ -870,7 +887,7 @@ impl Reader {
                             IssueKind::FacesNotShown,
                             Some(item),
                             missing,
-                            format!("solid '{name}': {missing} face(s) could not be meshed and are not shown"),
+                            format!("{}: {missing} face(s) could not be meshed and are not shown", self.label(item)),
                         );
                     }
                     if let Some(slot) = self.made.get_mut(i) {
@@ -910,7 +927,7 @@ impl Reader {
                         && let Some(refused) = body.smlib_refusal()
                     {
                         let at = refused.face.map(|f| format!(" (face {})", f + 1)).unwrap_or_default();
-                        let msg = format!("solid '{name}': needs repair before it can be modelled: {}{at}", refused.why);
+                        let msg = format!("{}: needs repair before it can be modelled: {}{at}", self.label(item), refused.why);
                         self.note(IssueKind::NeedsRepair, Some(item), usize::from(refused.face.is_some()), msg);
                     }
                     self.bodies.push(ImportedBody {
@@ -992,7 +1009,7 @@ impl Reader {
             let n = p.get(1).and_then(Param::as_str).filter(|s| !s.trim().is_empty()).or_else(|| p.first().and_then(Param::as_str))?;
             Some(n.trim().to_string())
         })();
-        name.filter(|n| !n.is_empty()).unwrap_or_else(|| "Import".into())
+        name.filter(|n| !n.is_empty()).unwrap_or_else(|| UNNAMED_PART.into())
     }
 
     /// Placement of a child occurrence in its parent.
@@ -1296,9 +1313,9 @@ impl StepReading {
             rd.node_items = rd.used_items.clone();
             rd.visits = 0;
             for r in loose {
-                rd.rep_bodies(r, &identity, &[], "Import", None, &mut bodies, 0);
+                rd.rep_bodies(r, &identity, &[], UNNAMED_PART, None, &mut bodies, 0);
             }
-            tree.push(StepNode { name: "Import".into(), transform: identity, bodies, children: Vec::new() });
+            tree.push(StepNode { name: UNNAMED_PART.into(), transform: identity, bodies, children: Vec::new() });
         }
         let single = workers <= 1;
         Ok(StepReading { rd, tree, key, small: text.len() <= KEEP_SMALL_BYTES, single })
