@@ -3,9 +3,11 @@
 # Run it from the Actions tab (Fork test release > Run workflow, branch sosub) or:
 #   gh workflow run fork-release.yml --repo kaztre/solidcraft --ref sosub -f notes="What changed"
 #
-# It builds macOS (universal .dmg), Windows x64 (.msi and portable .zip) and Linux x86_64 and
-# aarch64 (AppImage, .deb, .rpm, .tar.gz), numbers the build <Cargo.toml version>-test.<run>, and
-# publishes it as this repository's latest release. The apps it builds:
+# It publishes one download per platform, so testers can't pick the wrong one: macOS
+# (solidcraft-macos-universal.dmg), Windows (solidcraft-windows-x64.msi) and Linux
+# (solidcraft-linux-x86_64.AppImage), plus the SHA256SUMS.txt the in-app update checks them
+# against. It numbers the build <Cargo.toml version>-test.<run> and publishes it as this
+# repository's latest release. The apps it builds:
 #   - check this repository's releases for updates (SOLIDCRAFT_UPDATE_REPO), so testers are
 #     offered every newer test build in the app;
 #   - open Report a bug as a new issue on this repository in the tester's browser (Open on GitHub).
@@ -85,7 +87,6 @@ jobs:
       matrix:
         include:
           - { arch: x86_64, runner: ubuntu-24.04, deb: amd64 }
-          - { arch: aarch64, runner: ubuntu-24.04-arm, deb: arm64 }
     env:
       SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
       SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
@@ -256,35 +257,34 @@ jobs:
           pattern: release-*
           path: artifacts
           merge-multiple: true
-      - name: Version-less copies (what the in-app update picks by name)
-        working-directory: artifacts
+      - name: One download per platform, by the fixed names the in-app update picks
         run: |
-          shopt -s nullglob
-          for f in "solidcraft-$VERSION-"*; do
-            case "$f" in
-              *.msi | *-portable.zip | *.dmg | *.AppImage | *.deb | *.rpm)
-                cp -- "$f" "solidcraft-${f#"solidcraft-$VERSION-"}" ;;
-            esac
-          done
-          for f in solidcraft-windows-x64.msi solidcraft-macos-universal.dmg \
-            solidcraft-linux-x86_64.AppImage solidcraft-linux-x86_64.deb solidcraft-linux-x86_64.rpm; do
-            test -s "$f" || { echo "::error::missing version-less copy $f"; exit 1; }
+          mkdir publish
+          for f in windows-x64.msi macos-universal.dmg linux-x86_64.AppImage; do
+            test -s "artifacts/solidcraft-$VERSION-$f" || { echo "::error::missing solidcraft-$VERSION-$f"; exit 1; }
+            cp -- "artifacts/solidcraft-$VERSION-$f" "publish/solidcraft-$f"
           done
       - name: Checksums and notes
         run: |
-          (cd artifacts && sha256sum -- * | tee SHA256SUMS.txt)
+          (cd publish && sha256sum -- * | tee SHA256SUMS.txt)
           {
             echo "Test build of \`$GITHUB_REF_NAME\` at $GITHUB_SHA."
             echo
             if [ -n "$NOTES" ]; then printf '%s\n\n' "$NOTES"; fi
-            echo "**Download:** macOS \`solidcraft-macos-universal.dmg\` · Windows \`solidcraft-windows-x64.msi\` · Linux \`solidcraft-linux-x86_64.AppImage\` (or .deb / .rpm; aarch64 too)."
+            echo "**Download the one for your computer** (under Assets below):"
+            echo
+            echo "- Mac: \`solidcraft-macos-universal.dmg\`"
+            echo "- Windows: \`solidcraft-windows-x64.msi\`"
+            echo "- Linux: \`solidcraft-linux-x86_64.AppImage\` (make it executable, then run it; Ubuntu 24.04 or newer)"
+            echo
+            echo "\`SHA256SUMS.txt\` is for the app's own update check; you don't need it."
             echo
             echo "These builds are not signed. macOS: right-click SolidCraft > Open the first time (or System Settings > Privacy & Security > Open Anyway). Windows: More info > Run anyway."
             echo
             echo "Once installed, the app offers newer test builds itself. Found a problem? Use **Report a bug** in the title bar, then **Open on GitHub** (you need a free GitHub account to submit it)."
           } >notes.md
       - name: Publish
-        working-directory: artifacts
+        working-directory: publish
         run: |
           tag="v$VERSION"
           if gh release view "$tag" >/dev/null 2>&1; then

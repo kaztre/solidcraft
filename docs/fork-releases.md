@@ -65,14 +65,18 @@ gh run watch --repo kaztre/solidcraft
 About 30–45 minutes later the release is at github.com/kaztre/solidcraft/releases/latest, and
 testers' apps offer it within a day (or at once with Help ▸ Check for updates).
 
-Give new testers that page's link. The fixed names always fetch the newest build:
+A release holds one download per platform (and `SHA256SUMS.txt`, which the in-app update checks
+downloads against), so testers can't pick the wrong file. Give new testers that page's link. The
+fixed names always fetch the newest build:
 
 - macOS: `https://github.com/kaztre/solidcraft/releases/latest/download/solidcraft-macos-universal.dmg`
 - Windows: `https://github.com/kaztre/solidcraft/releases/latest/download/solidcraft-windows-x64.msi`
 - Linux: `https://github.com/kaztre/solidcraft/releases/latest/download/solidcraft-linux-x86_64.AppImage`
 
-The Linux packages are built on Ubuntu 24.04 (SMLib's Linux library needs glibc 2.38 or newer), so
-they run on Ubuntu 24.04, Fedora 40, Debian 13 or newer, not on older distributions.
+The AppImage runs on any distribution (make it executable, then run it) and updates itself in
+place. It is built on Ubuntu 24.04 (SMLib's Linux library needs glibc 2.38 or newer), so it needs
+Ubuntu 24.04, Fedora 40, Debian 13 or newer. There is no ARM Linux build; Windows is x64 only, and
+the macOS dmg runs on both Apple silicon and Intel Macs.
 
 The builds are not code-signed. On macOS the first open needs right-click ▸ Open (or System
 Settings ▸ Privacy & Security ▸ Open Anyway); on Windows SmartScreen needs More info ▸ Run anyway.
