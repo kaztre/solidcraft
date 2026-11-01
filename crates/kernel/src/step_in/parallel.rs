@@ -160,13 +160,15 @@ fn smlib_body(record: &solidcore_record::brep::Brep) -> std::result::Result<(Bod
     let (brep, smlib_order) = crate::native::smlib_record_ordered(record).map_err(failed)?;
     let (body, body_order) = crate::native::body_from_smlib_ordered(&brep).map_err(failed)?;
     // SMLib's face i is the record's `smlib_order` face and the body's `body_order` face (an
-    // empty order is the same one).
+    // empty order is the same one). Edges SMLib split where faces touch along them leave its
+    // faces numbered as the record's all the same.
+    let smlib_order = smlib_order.map(|o| o.faces).or_else(|| crate::native::smlib_faces_ordered(record, &brep));
     let (Some(smlib_order), Some(body_order)) = (smlib_order, body_order) else { return Err(renumbered()) };
     let at = |order: &[usize], i: usize| if order.is_empty() { Some(i) } else { order.get(i).copied() };
     let faces = brep.counts().map_err(|e| failed(KernelError::Failed(format!("SMLib: {e}"))))?[0];
     let mut of_record = vec![usize::MAX; body.face_count()];
     for i in 0..faces {
-        match (at(&body_order.faces, i).and_then(|b| of_record.get_mut(b)), at(&smlib_order.faces, i).filter(|r| *r < record.faces.len())) {
+        match (at(&body_order.faces, i).and_then(|b| of_record.get_mut(b)), at(&smlib_order, i).filter(|r| *r < record.faces.len())) {
             (Some(slot), Some(r)) => *slot = r,
             _ => return Err(renumbered()),
         }

@@ -477,6 +477,136 @@ fn half_tube_a_hair_off_its_torus_imports_as_a_solid() {
     assert!(rel(measure(&b.body).unwrap().volume, measure(&tube).unwrap().volume) < 1e-3);
 }
 
+/// A B-spline curve through `points` at `params` (cubic interpolation) as STEP entities from
+/// `#id`, its own entity `#id`; the ids it used next.
+fn spline_curve(id: u64, params: &[f64], points: &[[f64; 3]]) -> (String, u64) {
+    let c = solidcraft_geom::bspline::CurveN::<3>::interpolate(params, points, 3).unwrap();
+    let mut s = String::new();
+    let mut refs = Vec::new();
+    for (k, p) in c.ctrl.iter().enumerate() {
+        let i = id + 1 + k as u64;
+        s += &format!("#{i}=CARTESIAN_POINT('',({:.16},{:.16},{:.16}));\n", p[0], p[1], p[2]);
+        refs.push(format!("#{i}"));
+    }
+    let (mut knots, mut mults): (Vec<f64>, Vec<usize>) = (Vec::new(), Vec::new());
+    for k in &c.knots {
+        if knots.last() == Some(k) {
+            *mults.last_mut().unwrap() += 1;
+        } else {
+            knots.push(*k);
+            mults.push(1);
+        }
+    }
+    let list = |v: Vec<String>| v.join(",");
+    s += &format!(
+        "#{id}=B_SPLINE_CURVE_WITH_KNOTS('',{},({}),.UNSPECIFIED.,.F.,.F.,({}),({}),.UNSPECIFIED.);\n",
+        c.degree,
+        refs.join(","),
+        list(mults.iter().map(|m| m.to_string()).collect()),
+        list(knots.iter().map(|k| format!("{k:.16}")).collect()),
+    );
+    (s, id + 2 + c.ctrl.len() as u64)
+}
+
+/// A sheet of one face on a cylinder of `radius` about z: a strip `height` tall between two
+/// helices of `pitch` that run `turns` round the axis (a thread's root, as Inventor writes it:
+/// one face for every turn), and the two lines along the axis that close it.
+fn helical_strip_step(radius: f64, pitch: f64, turns: f64, height: f64) -> String {
+    use std::f64::consts::TAU;
+    let n = (turns * 32.0).ceil() as usize;
+    let sweep = turns * TAU;
+    let params: Vec<f64> = (0..=n).map(|k| sweep * k as f64 / n as f64).collect();
+    let helix = |lift: f64| -> Vec<[f64; 3]> { params.iter().map(|t| [radius * t.cos(), radius * t.sin(), pitch * t / TAU + lift]).collect() };
+    let (low, high) = (helix(0.0), helix(height));
+    let mut t = String::from(HEAD);
+    let (a, next) = spline_curve(1000, &params, &low);
+    t += &a;
+    let (b, _) = spline_curve(next, &params, &high);
+    t += &b;
+    let corner = |p: [f64; 3]| format!("({:.16},{:.16},{:.16})", p[0], p[1], p[2]);
+    let (l0, l1, h0, h1) = (low[0], *low.last().unwrap(), high[0], *high.last().unwrap());
+    t += &format!(
+        "#1=CARTESIAN_POINT('',{});\n#2=VERTEX_POINT('',#1);\n#3=CARTESIAN_POINT('',{});\n#4=VERTEX_POINT('',#3);\n#5=CARTESIAN_POINT('',{});\n#6=VERTEX_POINT('',#5);\n#7=CARTESIAN_POINT('',{});\n#8=VERTEX_POINT('',#7);\n",
+        corner(l0),
+        corner(l1),
+        corner(h1),
+        corner(h0),
+    );
+    // The lines up at the helices' ends.
+    t += "#10=DIRECTION('',(0.,0.,1.));\n#11=VECTOR('',#10,1.);\n#12=LINE('',#3,#11);\n#13=LINE('',#1,#11);\n";
+    t += &format!(
+        "#20=EDGE_CURVE('',#2,#4,#1000,.T.);\n#21=EDGE_CURVE('',#4,#6,#12,.T.);\n#22=EDGE_CURVE('',#8,#6,#{next},.T.);\n#23=EDGE_CURVE('',#2,#8,#13,.T.);\n"
+    );
+    // Up the low helix, up the line, back down the high helix and down the line: the strip lies to
+    // the left in (angle, height), the cylinder's outward normal.
+    t += "#30=ORIENTED_EDGE('',*,*,#20,.T.);\n#31=ORIENTED_EDGE('',*,*,#21,.T.);\n#32=ORIENTED_EDGE('',*,*,#22,.F.);\n#33=ORIENTED_EDGE('',*,*,#23,.F.);\n";
+    t += "#34=EDGE_LOOP('',(#30,#31,#32,#33));\n#35=FACE_OUTER_BOUND('',#34,.T.);\n";
+    t += &format!(
+        "#40=CARTESIAN_POINT('',(0.,0.,0.));\n#41=DIRECTION('',(0.,0.,1.));\n#42=DIRECTION('',(1.,0.,0.));\n#43=AXIS2_PLACEMENT_3D('',#40,#41,#42);\n#44=CYLINDRICAL_SURFACE('',#43,{radius:.16});\n"
+    );
+    t += "#45=ADVANCED_FACE('',(#35),#44,.T.);\n#46=OPEN_SHELL('',(#45));\n#47=SHELL_BASED_SURFACE_MODEL('Strip',(#46));\n";
+    t += &context(50, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += "#60=MANIFOLD_SURFACE_SHAPE_REPRESENTATION('',(#47),#50);\n";
+    t + TAIL
+}
+
+/// A thread's root as Inventor writes it, one cylinder face winding round its axis for several
+/// turns between two helices, comes in as that one face, its area the strip's unrolled
+/// parallelogram (radius x angle x height). A face's form spanned at most one turn, so the
+/// helices' pcurves jumped back across it and the face was refused (edges "mm off the face's
+/// surface"); three whole turns would also close the form on itself, which SMLib took as a
+/// surface closed round its axis.
+#[test]
+fn a_helical_strip_of_several_turns_imports_as_one_face() {
+    let (radius, pitch, height) = (5.0, 2.0, 1.0);
+    for turns in [2.5, 3.0] {
+        let imp = step_import(&helical_strip_step(radius, pitch, turns, height)).unwrap();
+        assert_eq!(imp.bodies.len(), 1, "{turns} turns: {:?}", imp.warnings);
+        let b = &imp.bodies[0];
+        assert!(b.refused.is_none() && !b.body.is_mesh() && b.body.face_count() == 1, "{turns} turns: {:?} {:?}", b.refused, imp.warnings);
+        let want = radius * turns * std::f64::consts::TAU * height;
+        let area = measure(&b.body).unwrap().area;
+        assert!(rel(area, want) < 1e-4, "{turns} turns: area {area} vs {want}");
+    }
+}
+
+/// A round all the way round a part (a quarter of a torus's tube, between its outer equator and
+/// its top) bounded by its two circles alone, with no seam edge, comes in with a seam along its
+/// tube and its exact area, 2 pi r (R pi/2 + r). It was refused ("a face winding around a torus
+/// ... without a seam edge"): a band round a cylinder, cone or sphere got a seam, a torus none.
+#[test]
+fn a_round_all_round_a_part_without_a_seam_imports() {
+    use std::f64::consts::PI;
+    let (major, minor) = (10.0, 1.0);
+    let mut t = String::from(HEAD);
+    t += "#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n";
+    t += &format!("#5=TOROIDAL_SURFACE('',#4,{major:.1},{minor:.1});\n");
+    // The outer equator (r R + r at z 0) and the top (r R at z r), each a circle about z.
+    t += &format!(
+        "#6=CIRCLE('',#4,{:.1});\n#7=CARTESIAN_POINT('',(0.,0.,{minor:.1}));\n#8=AXIS2_PLACEMENT_3D('',#7,#2,#3);\n#9=CIRCLE('',#8,{major:.1});\n",
+        major + minor
+    );
+    t += &format!(
+        "#10=CARTESIAN_POINT('',({:.1},0.,0.));\n#11=VERTEX_POINT('',#10);\n#12=CARTESIAN_POINT('',({major:.1},0.,{minor:.1}));\n#13=VERTEX_POINT('',#12);\n",
+        major + minor
+    );
+    t += "#14=EDGE_CURVE('',#11,#11,#6,.T.);\n#15=EDGE_CURVE('',#13,#13,#9,.T.);\n";
+    // The band lies above its equator running round +u and below its top running back.
+    t += "#16=ORIENTED_EDGE('',*,*,#14,.T.);\n#17=ORIENTED_EDGE('',*,*,#15,.F.);\n#18=EDGE_LOOP('',(#16));\n#19=EDGE_LOOP('',(#17));\n";
+    t += "#20=FACE_OUTER_BOUND('',#18,.T.);\n#21=FACE_BOUND('',#19,.T.);\n#22=ADVANCED_FACE('',(#20,#21),#5,.T.);\n";
+    t += "#23=OPEN_SHELL('',(#22));\n#24=SHELL_BASED_SURFACE_MODEL('Round',(#23));\n";
+    t += &context(50, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += "#60=MANIFOLD_SURFACE_SHAPE_REPRESENTATION('',(#24),#50);\n";
+    t += TAIL;
+    let imp = step_import(&t).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let b = &imp.bodies[0];
+    assert!(b.refused.is_none() && !b.body.is_mesh() && b.body.face_count() == 1, "{:?} {:?}", b.refused, imp.warnings);
+    let want = 2.0 * PI * minor * (major * PI / 2.0 + minor);
+    let area = measure(&b.body).unwrap().area;
+    assert!(rel(area, want) < 1e-6, "area {area} vs {want}");
+}
+
 #[test]
 fn several_bodies_and_names() {
     let a = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();

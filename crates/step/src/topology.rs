@@ -535,6 +535,24 @@ struct Builder<'b, 'a> {
     raised_edges: HashSet<u32>,
 }
 
+/// `c` moved the whole turns (four quarters of a form) that bring its start nearest `start`.
+fn onto_turn(c: Curve2, start: Option<f64>) -> R<Curve2> {
+    let Some(start) = start else { return Ok(c) };
+    let s = c.interval().and_then(|[a, _]| pcurve::eval(&c, a)).ok_or("pcurve start")?;
+    let turns = ((start - s[0]) / 4.0).round();
+    Ok(if turns == 0.0 { c } else { shifted_u(&c, 4.0 * turns) })
+}
+
+/// `c` moved `du` along u.
+fn shifted_u(c: &Curve2, du: f64) -> Curve2 {
+    match c {
+        Curve2::Spline { knots, points } => Curve2::Spline { knots: knots.clone(), points: points.iter().map(|p| [p[0] + du, p[1]]).collect() },
+        Curve2::RationalSpline { knots, homogeneous } => {
+            Curve2::RationalSpline { knots: knots.clone(), homogeneous: homogeneous.iter().map(|h| [h[0] + du * h[2], h[1], h[2]]).collect() }
+        }
+    }
+}
+
 impl<'b, 'a> Builder<'b, 'a> {
     fn new(ex: &'a Exchange, reader: &'b mut Reader<'a>, tol: f64, budget: &'b mut usize, trims: Option<&'b dyn Trims>) -> Self {
         Builder {
@@ -1337,22 +1355,51 @@ impl<'b, 'a> Builder<'b, 'a> {
                     None => self.face_extent(fi)?,
                 };
                 let extent = extent.ok_or_else(|| unsupported("a face whose boundary does not lie on its surface"))?;
-                Some(solidcraft_geom::brep::form::surface_within(&label, extent, tol).ok_or_else(|| unsupported("a face of more than one turn"))?)
+                let (f, d) = solidcraft_geom::brep::form::surface_within(&label, extent, tol).ok_or_else(|| unsupported("a face of more than one turn"))?;
+                Some((f, d, extent[0][0]))
             }
             None => None,
         };
-        let (form, box_on_form) = match form {
-            Some((f, d)) => (Some(f), Some(d)),
-            None => (None, None),
+        let (form, box_on_form, turns_from) = match form {
+            Some((f, d, lo)) => (Some(f), Some(d), lo),
+            None => (None, None, 0.0),
         };
         let surface = form.clone().unwrap_or_else(|| label.clone());
+        // A helical face (a thread's flank, more than a turn round its cylinder or cone) is its
+        // form alone, a rational spline face: an analytic surface spans at most one turn.
+        let helical = box_on_form.is_some_and(|[u, _]| u[1] - u[0] > 4.0 + 1e-9);
         // How far each edge lies off this surface, so its closed form is checked at that.
         self.measure_edges(&label, &edge_loops)?;
         // Closed forms where the geometry has them; the kernel makes the rest (`trims`).
         let exact = pcurve::exact_pcurves(&surface, &uses_of(&self.edges, &edge_loops, None)?, tol, box_on_form).map_err(|e| e.to_string())?;
+        let starts = if helical { Some(self.turn_starts(&label, &edge_loops, turns_from)?) } else { None };
+        let exact = match &starts {
+            Some(starts) => exact
+                .into_iter()
+                .zip(starts)
+                .map(|(l, s)| l.into_iter().zip(s).map(|(c, s)| c.map(|c| onto_turn(c, s.map(solidcraft_geom::brep::form::param))).transpose()).collect::<R<Vec<_>>>())
+                .collect::<R<Vec<_>>>()?,
+            None => exact,
+        };
         // Without a kernel, a use with neither is refused below with why.
-        let made = match self.trims {
-            Some(trims) if exact.iter().flatten().any(Option::is_none) => {
+        let made = match (&starts, self.trims) {
+            // A helical face's helices are walked here (`helix_pcurve`): no kernel is asked to
+            // project onto its form, which covers its surface more than once.
+            (Some(starts), _) => {
+                let mut made = Vec::with_capacity(exact.len());
+                for ((l, ex), st) in edge_loops.iter().zip(&exact).zip(starts) {
+                    let mut pcs = Vec::with_capacity(l.len());
+                    for ((&(e, _), x), s) in l.iter().zip(ex).zip(st) {
+                        pcs.push(match x {
+                            Some(c) => c.clone(),
+                            None => self.helix_pcurve(&label, e, s.ok_or("a helix the walk did not reach")?)?,
+                        });
+                    }
+                    made.push(pcs);
+                }
+                Some(made)
+            }
+            (None, Some(trims)) if exact.iter().flatten().any(Option::is_none) => {
                 let domain = match box_on_form {
                     Some(d) => d,
                     None => natural_box(&surface).ok_or_else(|| unsupported("a face on an unbounded surface without closed-form pcurves"))?,
@@ -1363,6 +1410,14 @@ impl<'b, 'a> Builder<'b, 'a> {
         };
         let pcs =
             pcurve::pcurves_within(&surface, &uses_of(&self.edges, &edge_loops, made.as_ref())?, tol, box_on_form).map_err(|e| e.to_string())?;
+        let pcs = match &starts {
+            Some(starts) => pcs
+                .into_iter()
+                .zip(starts)
+                .map(|(l, s)| l.into_iter().zip(s).map(|(c, s)| onto_turn(c, s.map(solidcraft_geom::brep::form::param))).collect::<R<Vec<_>>>())
+                .collect::<R<Vec<_>>>()?,
+            None => pcs,
+        };
         self.raise_edges(&surface, &edge_loops, &pcs)?;
         // Signed areas of the loops that close in (u, v).
         let periods = natural_periods(&surface);
@@ -1457,11 +1512,103 @@ impl<'b, 'a> Builder<'b, 'a> {
         }
         let pcs: Vec<Vec<Curve2>> = if rerun { pcs.into_iter().map(|l| l.into_iter().rev().collect()).collect() } else { pcs };
         let domain = face_domain(&surface, &pcs)?;
+        if helical {
+            face.surface = surface;
+            return Ok((pcs, domain, flip, None));
+        }
         Ok((pcs, domain, flip, form))
     }
 }
 
 impl Builder<'_, '_> {
+    /// Where each use of a helical face's loops starts on its form (the form parameter about the
+    /// axis at its edge's curve start). On a form of several turns a line along the axis or an arc
+    /// lies at the same place on each, and a projection onto it may settle on any: the box alone
+    /// does not say which. Each loop is walked along its edges on `label`, its angle about the axis
+    /// unwrapped from point to point, and set the whole turns that start its lowest angle at the
+    /// face's box (`from`).
+    fn turn_starts(&self, label: &BSurface, edge_loops: &[Vec<(u32, bool)>], from: f64) -> R<Vec<Vec<Option<f64>>>> {
+        // Points along each edge: enough that a helix of the most turns a face takes moves less
+        // than half a turn between two.
+        const STEPS: usize = 512;
+        let on = SurfaceEval::new(label).map_err(|m| m.to_string())?;
+        let mut out = Vec::with_capacity(edge_loops.len());
+        for l in edge_loops {
+            let mut starts = Vec::with_capacity(l.len());
+            let (mut prev, mut lowest) = (None::<[f64; 2]>, f64::INFINITY);
+            for &(e, forward) in l {
+                let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                let eval = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
+                let [t0, t1] = edge.interval;
+                let mut at_start = None;
+                for k in 0..=STEPS {
+                    let f = k as f64 / STEPS as f64;
+                    let t = if forward { t0 + (t1 - t0) * f } else { t1 + (t0 - t1) * f };
+                    let Some(p) = eval.point(t) else { continue };
+                    let Some(mut q) = on.project(p, prev, f64::INFINITY) else { continue };
+                    if let Some(r) = prev {
+                        q[0] += ((r[0] - q[0]) / TAU).round() * TAU;
+                    }
+                    lowest = lowest.min(q[0]);
+                    if (forward && k == 0) || (!forward && k == STEPS) {
+                        at_start = Some(q[0]);
+                    }
+                    prev = Some(q);
+                }
+                starts.push(at_start);
+            }
+            let shift = if lowest.is_finite() { ((from - lowest) / TAU).round() * TAU } else { 0.0 };
+            out.push(starts.into_iter().map(|a| a.map(|a| a + shift)).collect());
+        }
+        Ok(out)
+    }
+
+    /// The pcurve on a helical face's form of edge `e` (a helix round its cylinder or cone, with
+    /// no closed form), whose curve starts at angle `start` about the axis as its loop reaches it:
+    /// the curve's angle unwrapped along it and its height, through points along it at the edge's
+    /// parameters. A kernel projecting onto a form of several turns may settle on any turn at
+    /// each point; the walk stays on the one the loop is on.
+    fn helix_pcurve(&self, label: &BSurface, e: u32, start: f64) -> R<Curve2> {
+        // Points per quarter turn, and the most along one edge (the interpolation is dense).
+        const PER_QUARTER: f64 = 16.0;
+        const MAX_POINTS: usize = 640;
+        let on = SurfaceEval::new(label).map_err(|m| m.to_string())?;
+        let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+        // On the curve and interval its use is given on (`uses_of`): an arc's NURBS form.
+        let (curve, [t0, t1]) = match &edge.form {
+            Some((c, i)) => (c, *i),
+            None => (&edge.curve, edge.interval),
+        };
+        let eval = CurveEval::new(curve).map_err(|m| m.to_string())?;
+        let walk = |n: usize| -> R<Vec<(f64, [f64; 2])>> {
+            let mut out: Vec<(f64, [f64; 2])> = Vec::with_capacity(n + 1);
+            for k in 0..=n {
+                let t = if k == n { t1 } else { t0 + (t1 - t0) * (k as f64 / n as f64) };
+                let p = eval.point(t).ok_or("edge point")?;
+                let near = out.last().map(|(_, q)| *q);
+                let mut q = on.project(p, near, f64::INFINITY).ok_or("a helix point off its face's surface")?;
+                if let Some(r) = near {
+                    q[0] += ((r[0] - q[0]) / TAU).round() * TAU;
+                }
+                out.push((t, q));
+            }
+            Ok(out)
+        };
+        // A first pass finds how many turns the edge makes, the second samples it that densely.
+        let rough = walk(512)?;
+        let turned = match (rough.first(), rough.last()) {
+            (Some((_, a)), Some((_, b))) => (b[0] - a[0]).abs(),
+            _ => 0.0,
+        };
+        let n = ((turned / std::f64::consts::FRAC_PI_2 * PER_QUARTER).ceil() as usize).clamp(16, MAX_POINTS);
+        let points = walk(n)?;
+        let shift = points.first().map_or(0.0, |(_, q)| ((start - q[0]) / TAU).round() * TAU);
+        let params: Vec<f64> = points.iter().map(|(t, _)| *t).collect();
+        let uv: Vec<[f64; 2]> = points.iter().map(|(_, q)| [solidcraft_geom::brep::form::param(q[0] + shift), q[1]]).collect();
+        let c = solidcraft_geom::bspline::CurveN::<2>::interpolate(&params, &uv, 3).map_err(|m| m.to_string())?;
+        Ok(Curve2::Spline { knots: c.knots, points: c.ctrl })
+    }
+
     /// The face as a kernel takes it to make its missing pcurves: its edges and vertices
     /// numbered within it, each use with its closed-form pcurve where `exact` has one.
     fn trim_face<'s>(

@@ -74,6 +74,8 @@ enum Kind {
     Sphere(f64),
     /// A placed revolution with u the angle: its profile.
     Revolved(BCurve),
+    /// A torus, u the angle about its axis: its major radius, a seam an arc of its tube.
+    Tube(f64),
     /// A B-spline surface closed on itself around u: its boundary column at u = `u0` (the start
     /// of its knots), a curve in v, along which every seam runs.
     Iso {
@@ -101,6 +103,10 @@ fn axis(s: &BSurface) -> Option<Axis> {
         BSurface::Sphere { frame: f, radius } => {
             let (origin, z) = frame(f);
             Some(Axis { origin, z, kind: Kind::Sphere(*radius), poles: [Some(origin - z * *radius), Some(origin + z * *radius)], period: TAU })
+        }
+        BSurface::Torus { frame: f, major_radius, .. } => {
+            let (origin, z) = frame(f);
+            Some(Axis { origin, z, kind: Kind::Tube(*major_radius), poles: [None, None], period: TAU })
         }
         BSurface::PlacedRevolution { profile, origin, axis, matrix, forward: false } if *matrix == IDENTITY => {
             let (origin, z) = (Vec3::from(*origin), Vec3::from(*axis));
@@ -494,6 +500,26 @@ impl Builder<'_, '_> {
                     if along { [ta, tb] } else { [tb, ta] },
                     along,
                 )
+            }
+            Kind::Tube(major) => {
+                // The tube's circle through a, from a round the tube the way v rises to b: a band
+                // round the axis lies above (in v) the loop running +u, from which the seam runs
+                // (`band_seam`), and below the other.
+                let d = pa - ax.origin;
+                let radial = (d - ax.z * d.dot(ax.z)).normalized().ok_or("a seam on the torus's axis")?;
+                let centre = ax.origin + radial * *major;
+                let x = (pa - centre).normalized().ok_or("a seam from the tube's centre")?;
+                let qa = eval.project(pa, None, f64::INFINITY).ok_or("a seam vertex off its surface")?;
+                let qb = eval.project(pb, Some(qa), f64::INFINITY).ok_or("a seam vertex off its surface")?;
+                // Which way v rises at a, across the tube.
+                let ahead = eval.point([qa[0], qa[1] + 1e-3]).ok_or("a point on the torus")? - centre;
+                let y = (ahead - x * ahead.dot(x)).normalized().ok_or("a degenerate tube")?;
+                let theta = (qb[1] - qa[1]).rem_euclid(TAU);
+                if !(theta > 0.0 && theta < TAU) {
+                    return Err("a degenerate seam".into());
+                }
+                let r = (pa - centre).len();
+                (BCurve::Circle { frame: Frame { origin: arr(centre), x_axis: arr(x), y_axis: arr(y) }, radius: r }, [0.0, theta], true)
             }
             Kind::Iso { column, .. } => {
                 // Each vertex's v on the surface (a pole's from its end of the v range).
