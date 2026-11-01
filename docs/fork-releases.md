@@ -78,8 +78,32 @@ place. It is built on Ubuntu 24.04 (SMLib's Linux library needs glibc 2.38 or ne
 Ubuntu 24.04, Fedora 40, Debian 13 or newer. There is no ARM Linux build; Windows is x64 only, and
 the macOS dmg runs on both Apple silicon and Intel Macs.
 
-The builds are not code-signed. On macOS the first open needs right-click ▸ Open (or System
-Settings ▸ Privacy & Security ▸ Open Anyway); on Windows SmartScreen needs More info ▸ Run anyway.
+Until the fork has the Apple secrets ("Mac signing" below), the Mac app is only ad-hoc signed.
+macOS 15 and newer then refuse the first open, and right-click ▸ Open no longer gets past that.
+The tester presses Done, then System Settings ▸ Privacy & Security ▸ "SolidCraft was blocked" ▸
+Open Anyway, or runs `xattr -dr com.apple.quarantine /Applications/SolidCraft.app` once in
+Terminal. The release notes say so while the app is unsigned. Updates the app downloads itself
+aren't marked as downloaded, so they open normally. On Windows SmartScreen needs More info ▸ Run
+anyway.
+
+## Mac signing
+
+A Mac app opens with a double-click only when it is signed with an Apple **Developer ID** and
+notarized by Apple. That needs an Apple Developer Program membership (US$99 a year,
+developer.apple.com/programs). fork-release.yml signs and notarizes as soon as these repository
+secrets exist (Settings ▸ Secrets and variables ▸ Actions), using the same scripts as
+release.yml (docs/releasing.md, "macOS signing and notarization"):
+
+| Secret | Content |
+| --- | --- |
+| `APPLE_CERTIFICATE_P12` | base64 of the **Developer ID Application** certificate and key, exported as `.p12` |
+| `APPLE_CERTIFICATE_PASSWORD` | password of that `.p12` |
+| `APPLE_API_KEY_P8` | text of the App Store Connect API key (`AuthKey_<id>.p8`) |
+| `APPLE_API_KEY_ID` | the key's ID |
+| `APPLE_API_ISSUER` | the issuer ID (App Store Connect ▸ Users and Access ▸ Integrations) |
+
+The signature shows the account holder's name to testers. Without the secrets the job summary
+says "the app is ad-hoc signed and not notarized".
 
 ## Things to know
 
