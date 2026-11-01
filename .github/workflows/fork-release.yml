@@ -207,9 +207,14 @@ jobs:
       # link. Compiled from source here instead, where cc follows crt-static (/MT).
       - name: Fetch SMLib sources (crates/smlib/SMLIB_REV)
         shell: bash
+        env:
+          # Git Bash would turn the sparse-checkout paths (/capi/, /source/SMLib/) into Windows
+          # paths, so nothing would be checked out.
+          MSYS_NO_PATHCONV: "1"
         run: |
           rm -rf target/smlib-*-prebuilt/x86_64-pc-windows-msvc
           scripts/fetch-smlib.sh --source
+          ls target/smlib-*/capi/include/smlib.h
       - name: Install WiX
         shell: pwsh
         run: |
