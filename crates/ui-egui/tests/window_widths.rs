@@ -24,15 +24,15 @@ fn window_widths(h: &Harness) -> Vec<(egui::Id, f32)> {
 }
 
 fn kit_table_limit(id: egui::Id) -> Option<f32> {
-    // The accepted Preferences board has a page list and one control/preview pair at 880 pt.
-    if id == egui::Id::new("sc_prefs") {
+    // The accepted Preferences board has a page list and one control/preview pair at 880 pt; the
+    // Parts Library has its category tree beside the parts the same way.
+    if id == egui::Id::new("sc_prefs") || id == egui::Id::new("sc_parts_library") {
         return Some(solidcraft_ui_egui::theme::Tokens::get().form_card_width * 10.0 / 3.0);
     }
     [
         egui::Id::new("sc_bom"),
         egui::Id::new("sc_gesture_editor"),
         egui::Id::new("sc_params_dialog"),
-        egui::Id::new("sc_parts_library"),
         egui::Id::new("sc_material_card_review"),
         egui::Id::new(("sc_dialog", "CONFIGURATIONS")),
         egui::Id::new(("sc_dialog", "MOTION STUDY")),

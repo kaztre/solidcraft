@@ -5,63 +5,100 @@ folder (iCloud Drive, Google Drive, OneDrive). Its sub-folders are the library's
 example:
 
 ```
-LIBRARIES/
-  PARTS LIBRARY/
-    THRUSTERS/
-      BLUE ROBOTICS/
-        T200_THRUSTER_BR-100545/
-          T200.STEP
-          T200.solidcraft
-    CAMERAS/
-  CONNECTOR LIBRARY/
-    SUBSEA CONNECTORS/
+ROV PARTS/
+  THRUSTERS/
+    BLUE ROBOTICS/
+      T200_THRUSTER_BR-100545/
+        T200.STEP
+        T200.solidcraft
+  CAMERAS/
+  SUBSEA CONNECTORS/
 ```
+
+You can keep several libraries: a team library everyone shares, your own parts, vendor downloads.
 
 ## The Parts Library window
 
-**Insert ▸ Library ▸ Parts Library** in the toolbar opens it.
+**Library** in the toolbar opens it: on the **Insert** tab (Library group) and the **Assemble**
+tab (Components group).
 
-1. **Choose Folder…** picks the library folder. SolidCraft remembers it, so the window opens on
-   it next time. **Refresh** reads the folder again after parts were added.
-2. Type in the search box. Every word must appear in the part's name, its folders, its file type,
-   its part number or its description, in any case; `_` in a file name counts as a space, so
-   `t200 thruster` finds `T200_THRUSTER_BR-100545`. Parts whose names match come first.
-3. Pick a part and press **Insert Part**, or double-click it.
+- **Add Library…** picks a folder and adds it to the list, named after the folder. SolidCraft
+  remembers the list. **Remove Library** takes the library picked in the tree out of the list;
+  its files stay where they are. **Refresh** reads the libraries again after parts were added.
+- The **tree** on the left lists **All libraries**, each library and its folders, with how many
+  parts each holds. Pick one to see only its parts; the arrow opens and closes a folder.
+- **Pictures** or **List**: pictures of the parts, or a list with each part's part number, folder
+  and file type.
+- Type in the **search** box. Every word must appear in the part's name, its folders, its file
+  type, its part number or its description, in any case; `_` in a file name counts as a space, so
+  `t200 thruster` finds `T200_THRUSTER_BR-100545`. Parts whose names match come first.
+- Pick a part and press **Insert Part**, or double-click it.
 
-What Insert Part does depends on the file:
+A part alone in a vendor's folder named after it (`M10_TO_M14_BULKHEAD_ADAPTER_BR-102909/
+BR-102512_RevA.STEP`) is listed under the folder's name. When a folder holds one part in several
+formats with one name (`T200.STEP`, `T200.IGS`, `T200.STL`), the window lists it once: the
+SolidCraft part, then STEP, then IGES. Meshes (`.stl`, `.obj`), drawings and SolidWorks files
+(`.sldprt`, which SolidCraft can't read) are not listed. Hidden files and folders (names starting
+with `.`) and shortcuts are skipped.
 
-| File | Goes into the design as |
-| --- | --- |
-| A SolidCraft design (`.solidcraft`) | A **linked** component (`component.insert_design`). When the library part changes, **Update Links** brings the change in. The design also keeps a copy, so it opens without the library. |
-| STEP (`.step`, `.stp`), IGES (`.igs`, `.iges`), FreeCAD or Rhino | A copy of its bodies (`file.insert_step`). Later changes to the file don't reach the design. |
+## Linked library parts
 
-When a folder holds one part in several formats with one name (a vendor's `T200.STEP`,
-`T200.IGS` and `T200.STL`), the window lists it once, using the design, then STEP, then IGES.
-Meshes (`.stl`, `.obj`), drawings and SolidWorks files (`.sldprt`, which SolidCraft can't read)
-are not listed. Hidden files and folders (names starting with `.`) and shortcuts are skipped.
+**Insert Part** always links the part (`component.insert_design`): when the library part changes,
+**Update Links** brings the change into every assembly that uses it. The assembly also keeps a
+copy, so it opens without the library.
+
+A STEP or IGES part is first saved as a SolidCraft part beside it, with the same name
+(`T200.STEP` → `T200.solidcraft`), then linked. From then on the library lists the SolidCraft
+part instead of the STEP, which stays as the vendor's original. The new part gets:
+
+- its **name** and **description** from the name the window shows,
+- a **part number** found in the names, such as `BR-102909` (one to five letters, a hyphen and at
+  least three digits),
+- its **picture**, saved in the file,
+- and, with **Stand up parts exported with Y up** on (the default), a quarter turn about X when
+  the STEP file says it came from a Y-up program such as SolidWorks.
+
+Change the properties later with File ▸ Design Properties… in the part. If the part can't be
+saved in the library (a folder you can't write to), a copy of the STEP is inserted instead, and
+the window says why.
+
+## Converting a whole category
+
+Pick a library or a folder in the tree and press **Convert N to SolidCraft Parts…**: it saves every
+STEP and IGES part there as a SolidCraft part, as above, one after another beside the window. You
+can keep working; **Stop** ends it after the part in hand. Parts already converted are left alone,
+so converting again carries on where it stopped. At the end the window lists the parts that
+couldn't be converted and why (a file over the 512 MB import limit, a file SolidCraft can't read).
+
+Converting downloads every file a synced folder keeps only in the cloud, and large assemblies take
+minutes each, so try one category first.
+
+## Pictures
+
+A SolidCraft part shows the picture saved in it. A STEP or IGES part's picture is drawn once and
+kept on this computer. So that a library in iCloud Drive or Google Drive isn't downloaded just to be
+browsed, a picture is drawn by itself only for a file already on this computer and up to 30 MB;
+the others show a download sign until you click them. Converting a category gives every part its
+picture, for everyone who uses the library.
 
 ## Part numbers and descriptions
 
-A design's **part number**, **description** and **revision** (File ▸ Design Properties…) show in
-the window and are searched. They also go into the bill of materials of every assembly the part is
-inserted into. A STEP or IGES file has no such properties: its name and folders are what the
-search finds.
+A part's **part number**, **description** and **revision** (File ▸ Design Properties…) show in
+the list and are searched. They also go into the bill of materials of every assembly the part is
+inserted into.
 
 ## Synced and shared folders
 
-The window lists STEP and IGES files from their names and sizes only, so a library in iCloud
-Drive or Google Drive isn't downloaded just to be searched. A design's properties are read from a
-small part of its file, but a synced service may still download the whole file to read it.
-Inserting a part downloads it.
-
 Linked parts are found by a path relative to the assembly that uses them (Insert Design in
-docs/book/src/guide/assemblies.md), so keep the library and your projects inside one top folder and
-move or sync that folder as a whole. Renaming a library folder breaks the links that pass through
-it; **Relink Source (All Instances)…** points them at the new place.
+docs/book/src/guide/assemblies.md), so keep the libraries and your projects inside one top folder
+and move or sync that folder as a whole. Renaming a library folder breaks the links that pass
+through it; **Relink Source (All Instances)…** points them at the new place.
 
 ## Scripts and agents
 
-`library.parts.search {folder, query?, limit?}` lists the same parts without changing the design:
-each part's path in the library, its file on this computer, name, folders, `kind` (`design` or
-`cad`), file type, size and properties. Insert one with `component.insert_design` or
-`file.insert_step` and the part's `file`.
+`library.parts.search {folder, query?, limit?}` lists a library's parts without changing the
+design: each part's path in the library, its file on this computer, name, folders, `kind`
+(`design` or `cad`), file type, size and properties. `library.parts.convert {path, name?,
+part_number?, description?, organization?, stand_up?, overwrite?}` saves a CAD file as a library
+part beside it, without changing the open design. Link one with `component.insert_design` and its
+`file`.
