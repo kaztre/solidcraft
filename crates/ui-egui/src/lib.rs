@@ -311,6 +311,7 @@ pub mod ui_kit;
 mod ui_kit_guard_tests;
 pub mod update;
 mod value_step;
+pub mod versions;
 pub(crate) mod view_angles;
 mod view_confirm;
 pub mod view_pick;
@@ -568,6 +569,8 @@ pub struct SolveApp {
     parts_workers: std::sync::Arc<parts_library::Workers>,
     /// The watch over the front design's linked parts (`linked_watch`).
     pub link_watch: linked_watch::Watch,
+    /// The Versions tab of the Browser panel (docs/versions.md).
+    pub versions: versions::Versions,
     material_card_review: Option<material_card_review::ReviewWindow>,
     /// Context menus, rename box and Properties window.
     pub menu: context_menu::MenuState,
@@ -829,6 +832,7 @@ impl SolveApp {
             parts_library: None,
             parts_workers: Default::default(),
             link_watch: Default::default(),
+            versions: Default::default(),
             material_card_review: None,
             menu: context_menu::MenuState::default(),
             gesture: mouse_gesture::State::default(),

@@ -126,6 +126,7 @@ mod surface;
 mod surface_analysis;
 mod surface_boundary;
 mod surface_match;
+mod versions;
 mod view_dxf;
 mod view_navigation;
 
@@ -346,6 +347,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(config::COMMANDS.iter());
     v.extend(parts::COMMANDS.iter());
     v.extend(parts_library::COMMANDS.iter());
+    v.extend(versions::COMMANDS.iter());
     v.extend(bom::COMMANDS.iter());
     v.extend(mass_properties::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());

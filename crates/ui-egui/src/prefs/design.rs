@@ -185,6 +185,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
             let response = setting::linked_parts_auto_update(app, ui).on_hover_text(app.tr("prefs.linked_parts_auto_update_note"));
             crate::scenario::publish_target("prefs:linked_parts_auto_update", response.rect);
+            let response = setting::versions_tab(app, ui).on_hover_text(app.tr("prefs.versions_tab_note"));
+            crate::scenario::publish_target("prefs:versions_tab", response.rect);
             let response = setting::insert_lists_open_designs(app, ui);
             crate::scenario::publish_target("prefs:insert_lists_open_designs", response.rect);
             crate::scenario::publish_target("dialog:Insert Design lists the designs open in other tabs first", response.rect);
