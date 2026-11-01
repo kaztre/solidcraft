@@ -1,9 +1,0 @@
-{
-  "en": {
-    "ui.bug_report_send": "Send report",
-    "ui.bug_report_send_failed": "Could not send the report: {error}. It is still open here; copy it or try again.",
-    "ui.bug_report_sending": "Sending the report…",
-    "ui.bug_report_sends": "Sends your answers, the technical details and the screenshot to the developer of this test build, where they become a public issue on GitHub. The design is not sent. A copy is also saved on this computer.",
-    "ui.bug_report_sent": "Sent. It is filed at {url}"
-  }
-}

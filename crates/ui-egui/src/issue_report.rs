@@ -12,9 +12,7 @@ use egui::{ColorImage, TextureHandle};
 use crate::{SolveApp, dialogs, help};
 
 mod form;
-mod send;
-
-pub use send::{Answer as SendAnswer, SendReport};
+mod github;
 
 const MAX_ANSWER: usize = 2000;
 const MAX_BODY: usize = 24_000;
@@ -103,7 +101,6 @@ impl Drop for CadInput {
     }
 }
 
-#[derive(Default)]
 pub struct ReportState {
     pub draft: Option<Draft>,
     /// Where Save report writes (`solidcraft_engine::bug_report::default_dir`, set by the desktop
@@ -111,8 +108,14 @@ pub struct ReportState {
     pub dir: Option<std::path::PathBuf>,
     pending: Option<Pending>,
     cad_focus: Option<egui::Id>,
-    /// Send report in flight (a fork's test builds, `send`).
-    sending: send::Sending,
+    /// The fork a test build files reports on (`github`); None: the form only saves and copies.
+    pub(crate) github: Option<&'static str>,
+}
+
+impl Default for ReportState {
+    fn default() -> Self {
+        Self { draft: None, dir: None, pending: None, cad_focus: None, github: crate::update::fork_repo() }
+    }
 }
 
 pub struct Draft {
@@ -133,10 +136,6 @@ pub struct Draft {
     dialog_commands: Option<serde_json::Value>,
     /// The report this draft was saved as, until it is edited again.
     saved: Option<String>,
-    /// What was sent (`send::fingerprint`): the same report is not sent twice.
-    sent: Option<u64>,
-    /// What is being sent.
-    sending: Option<u64>,
 }
 
 impl Draft {
@@ -156,8 +155,6 @@ impl Draft {
             missing_description: false,
             dialog_commands: None,
             saved: None,
-            sent: None,
-            sending: None,
         }
     }
 
@@ -586,7 +583,6 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     if pending(app) {
         ctx.request_repaint_after(std::time::Duration::from_millis(16));
     }
-    send::poll(app, ctx);
 }
 
 pub(crate) fn receive(app: &mut SolveApp, token: u64, image: Arc<ColorImage>) {
@@ -773,37 +769,33 @@ mod tests {
     }
 
     #[test]
-    fn issue_report_send_files_the_reviewed_report_once_and_keeps_a_copy() {
+    fn issue_report_open_on_github_opens_the_reviewed_report_as_an_issue_and_keeps_a_copy() {
         let mut h = crate::scenario::Harness::new();
         let dir = report_dir(&mut h);
         h.app.home.open = false;
-        let sent: Arc<std::sync::Mutex<Vec<serde_json::Value>>> = Arc::default();
-        let log = sent.clone();
-        h.app.services.send_report = Some(Arc::new(move |body: Vec<u8>, done: std::sync::mpsc::Sender<SendAnswer>| {
-            log.lock().unwrap().push(serde_json::from_slice(&body).unwrap());
-            let _ = done.send(Ok((201, br#"{"url":"https://github.com/kaztre/solidcraft/issues/7","number":7}"#.to_vec())));
-        }));
+        h.app.issue_report.github = Some("kaztre/solidcraft");
         let mut draft = Draft::new("Fillet fails".into(), "Technical context".into(), 0);
         draft.description = "The fillet failed".into();
+        draft.image = Some(Arc::new(ColorImage::new([4, 4], vec![egui::Color32::WHITE; 16])));
         h.app.issue_report.draft = Some(draft);
         h.frames(16);
-        assert!(h.widget("Save report").is_none(), "a build that sends has one primary action");
-        let commands = click_commands(&mut h, "Send report");
-        assert!(!commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(_))), "nothing opens a browser");
-        {
-            let sent = sent.lock().unwrap();
-            assert_eq!(sent.len(), 1);
-            assert_eq!(sent[0]["title"], "Fillet fails");
-            let body = sent[0]["body"].as_str().unwrap();
-            assert!(body.contains("The fillet failed") && body.contains("Technical context"), "{body}");
-            assert!(sent[0].get("design").is_none(), "the design is never sent");
-        }
-        let draft = h.app.issue_report.draft.as_ref().unwrap();
-        assert!(draft.note.contains("https://github.com/kaztre/solidcraft/issues/7"), "{}", draft.note);
-        assert_eq!(solidcraft_engine::bug_report::list(&dir).len(), 1, "a copy stays on this computer");
-        // Sent and not edited since: another click sends nothing.
-        click_commands(&mut h, "Send report");
-        assert_eq!(sent.lock().unwrap().len(), 1);
+        assert!(h.widget("Save report").is_none(), "a build that files on GitHub has one primary action");
+        let commands = click_commands(&mut h, "Open on GitHub");
+        let urls: Vec<&str> = commands
+            .iter()
+            .filter_map(|c| match c {
+                egui::OutputCommand::OpenUrl(o) => Some(o.url.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(urls.len(), 1, "{urls:?}");
+        assert!(urls[0].starts_with("https://github.com/kaztre/solidcraft/issues/new?labels=bug&title=Fillet%20fails&body="), "{}", urls[0]);
+        assert!(urls[0].contains("The%20fillet%20failed") && urls[0].contains("Technical%20context"), "{}", urls[0]);
+        let saved = solidcraft_engine::bug_report::list(&dir);
+        assert_eq!(saved.len(), 1, "a copy stays on this computer");
+        let screenshot = solidcraft_engine::bug_report::read(&dir, &saved[0].id).unwrap()["screenshot_path"].as_str().unwrap().to_string();
+        let note = &h.app.issue_report.draft.as_ref().unwrap().note;
+        assert!(note.contains(&screenshot), "the note says where the screenshot to attach is: {note}");
         let _ = std::fs::remove_dir_all(dir);
     }
 

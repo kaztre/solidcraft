@@ -8,8 +8,7 @@
 # publishes it as this repository's latest release. The apps it builds:
 #   - check this repository's releases for updates (SOLIDCRAFT_UPDATE_REPO), so testers are
 #     offered every newer test build in the app;
-#   - send Report a bug to the report service in the REPORT_URL repository variable
-#     (tools/report-worker), with the REPORT_KEY secret, when those are set.
+#   - open Report a bug as a new issue on this repository in the tester's browser (Open on GitHub).
 # Nothing is signed: testers see Gatekeeper / SmartScreen warnings (docs/fork-releases.md).
 # The jobs follow release.yml's; when that changes upstream, carry the change over here.
 name: Fork test release
@@ -32,10 +31,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
-  # Baked into every binary at build time (crates/ui-egui/src/update.rs, apps/solidcraft/src/main.rs).
+  # Baked into every binary at build time (crates/ui-egui/src/update.rs, issue_report/github.rs).
   SOLIDCRAFT_UPDATE_REPO: ${{ github.repository }}
-  SOLIDCRAFT_REPORT_URL: ${{ vars.REPORT_URL }}
-  SOLIDCRAFT_REPORT_KEY: ${{ secrets.REPORT_KEY }}
 
 jobs:
   version:
@@ -52,10 +49,7 @@ jobs:
           # Test builds are numbered in order, and the app offers a newer one (update.rs, is_newer).
           VERSION="${VERSION%%-*}-test.$GITHUB_RUN_NUMBER"
           { echo "version=$VERSION"; echo "date=$(date -u +%Y-%m-%d)"; } >>"$GITHUB_OUTPUT"
-          {
-            echo "### SolidCraft v$VERSION (\`${GITHUB_SHA::9}\`, $GITHUB_REF_NAME)"
-            if [ -n "$SOLIDCRAFT_REPORT_URL" ]; then echo "Report a bug sends to $SOLIDCRAFT_REPORT_URL"; else echo "No REPORT_URL variable: Report a bug only saves locally."; fi
-          } >>"$GITHUB_STEP_SUMMARY"
+          echo "### SolidCraft v$VERSION (\`${GITHUB_SHA::9}\`, $GITHUB_REF_NAME)" >>"$GITHUB_STEP_SUMMARY"
 
   # The app icon in every size, for the Windows job.
   icons:
@@ -267,7 +261,7 @@ jobs:
             echo
             echo "These builds are not signed. macOS: right-click SolidCraft > Open the first time (or System Settings > Privacy & Security > Open Anyway). Windows: More info > Run anyway."
             echo
-            echo "Once installed, the app offers newer test builds itself. Found a problem? Use **Report a bug** in the title bar."
+            echo "Once installed, the app offers newer test builds itself. Found a problem? Use **Report a bug** in the title bar, then **Open on GitHub** (you need a free GitHub account to submit it)."
           } >notes.md
       - name: Publish
         working-directory: artifacts

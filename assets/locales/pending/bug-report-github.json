@@ -1,0 +1,37 @@
+{
+  "en": {
+    "ui.bug_report_github": "Open on GitHub",
+    "ui.bug_report_github_cut": "The report was too long to fill in whole, so the full report is on your clipboard to paste there.",
+    "ui.bug_report_github_guidance": "Opens your answers and the technical details as a new issue on GitHub in your browser, where you sign in and press Submit. Issues there are public. The design is not sent. A copy is also saved on this computer.",
+    "ui.bug_report_github_opened": "Opened in your browser. Sign in to GitHub, check the report and press Submit new issue.",
+    "ui.bug_report_github_screenshot": "To attach the screenshot, drag it in from {path}."
+  },
+  "ar": {
+    "ui.bug_report_github": "فتح على GitHub",
+    "ui.bug_report_github_cut": "التقرير أطول من أن يُملأ كاملًا، لذا نُسخ التقرير الكامل إلى الحافظة لتلصقه هناك.",
+    "ui.bug_report_github_guidance": "يفتح إجاباتك والتفاصيل التقنية كمشكلة جديدة على GitHub في متصفحك، حيث تسجّل الدخول وتضغط Submit. المشكلات هناك عامة. لا يُرسل التصميم. تُحفظ نسخة أيضًا على هذا الحاسوب.",
+    "ui.bug_report_github_opened": "فُتح في متصفحك. سجّل الدخول إلى GitHub وراجع التقرير ثم اضغط Submit new issue.",
+    "ui.bug_report_github_screenshot": "لإرفاق لقطة الشاشة، اسحبها من {path}."
+  },
+  "he": {
+    "ui.bug_report_github": "פתיחה ב-GitHub",
+    "ui.bug_report_github_cut": "הדוח ארוך מכדי למלא אותו במלואו, ולכן הדוח המלא הועתק ללוח כדי שתדביקו אותו שם.",
+    "ui.bug_report_github_guidance": "פותח את התשובות שלכם ואת הפרטים הטכניים כבעיה חדשה ב-GitHub בדפדפן, שם מתחברים ולוחצים Submit. הבעיות שם ציבוריות. התכן אינו נשלח. עותק נשמר גם במחשב זה.",
+    "ui.bug_report_github_opened": "נפתח בדפדפן. התחברו ל-GitHub, בדקו את הדוח ולחצו Submit new issue.",
+    "ui.bug_report_github_screenshot": "כדי לצרף את צילום המסך, גררו אותו מ-{path}."
+  },
+  "ja": {
+    "ui.bug_report_github": "GitHub で開く",
+    "ui.bug_report_github_cut": "レポートが長すぎて全体を入力できないため、レポート全体をクリップボードにコピーしました。そこに貼り付けてください。",
+    "ui.bug_report_github_guidance": "回答と技術的な詳細を、ブラウザーで GitHub の新しい Issue として開きます。サインインして Submit を押してください。Issue は公開されます。デザインは送信されません。コピーはこのコンピューターにも保存されます。",
+    "ui.bug_report_github_opened": "ブラウザーで開きました。GitHub にサインインし、レポートを確認して Submit new issue を押してください。",
+    "ui.bug_report_github_screenshot": "スクリーンショットを添付するには、{path} からドラッグしてください。"
+  },
+  "zh": {
+    "ui.bug_report_github": "在 GitHub 上打开",
+    "ui.bug_report_github_cut": "报告太长，无法完整填入，因此完整报告已复制到剪贴板，请粘贴到那里。",
+    "ui.bug_report_github_guidance": "在浏览器中将你的回答和技术细节作为 GitHub 上的新问题打开，你在那里登录并点击 Submit。那里的问题是公开的。不会发送设计。副本也会保存在此计算机上。",
+    "ui.bug_report_github_opened": "已在浏览器中打开。登录 GitHub，检查报告后点击 Submit new issue。",
+    "ui.bug_report_github_screenshot": "要附加屏幕截图，请从 {path} 拖入。"
+  }
+}

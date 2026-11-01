@@ -7,14 +7,13 @@ keeps them updated, and gets their bug reports back as GitHub issues.
  you ── Run workflow ──► GitHub Actions (fork-release.yml) ──► Release v0.24.0-test.N (latest)
                                                                      │
  tester's app ◄── "Update available" (checks kaztre/solidcraft) ─────┘
- tester's app ── Report a bug ▸ Send report ──► Cloudflare Worker ──► issue on kaztre/solidcraft
-                                                (holds the GitHub token)   (+ screenshot in R2)
+ tester's app ── Report a bug ▸ Open on GitHub ──► tester's browser ──► issue on kaztre/solidcraft
+                                                  (signed in to GitHub)
 ```
 
 - **Reading** needs nothing special: releases on a public repository are public downloads.
-- **Writing** (bug reports) goes through the Worker in `tools/report-worker`, which holds a GitHub
-  token that can only create issues on this one repository. The token is never in the app, so a
-  tester cannot use it to change the code, releases or anything else.
+- **Writing** (bug reports) is done by the tester on github.com, signed in with their own GitHub
+  account. The app holds no token and uploads nothing; there is no service to run.
 
 ## What the test builds do differently
 
@@ -25,13 +24,16 @@ are unchanged.
   higher than the last, also after a rebase onto a newer upstream version.
 - The update check asks this repository (`SOLIDCRAFT_UPDATE_REPO`) instead of upstream, and offers
   a newer test build (`crates/ui-egui/src/update.rs`). Testers get **Update now** in the title bar.
-- Report a bug's main button is **Send report** (`SOLIDCRAFT_REPORT_URL`). It sends the title, the
-  tester's answers, the technical details and the screenshot, all of which the tester sees and can
-  edit in the form first. The design file is never sent. A copy is still saved on their computer.
+- Report a bug's main button is **Open on GitHub** (`crates/ui-egui/src/issue_report/github.rs`).
+  It saves a copy on the tester's computer, then opens a new issue on this repository in their
+  browser with the title, their answers and the technical details filled in. They sign in, check
+  it and press Submit. The design file is never sent.
+  - The screenshot can't be filled in by the address: the app's note says where the saved
+    `screenshot.png` is, to drag into the issue.
+  - A browser address holds about 8,000 characters. A longer report is cut short there, and the
+    whole report is put on the clipboard to paste in instead.
 
-## One-time setup
-
-### 1. GitHub repository settings (github.com/kaztre/solidcraft/settings)
+## One-time setup (github.com/kaztre/solidcraft/settings)
 
 1. **General ▸ Features ▸ Issues**: turn on (forks start with issues off).
 2. **General ▸ Default branch**: switch to `sosub`. GitHub only lets you run a workflow by hand when
@@ -48,51 +50,8 @@ are unchanged.
    ```
 
    Keep `fork-release.yml`, and `ci.yml` if you want CI on your pushes.
-4. **Issues ▸ Labels**: add `from-app` (and keep `bug`). Reports get both.
-
-### 2. A GitHub token for the Worker (issues only)
-
-github.com/settings/personal-access-tokens/new (fine-grained):
-
-- Resource owner `kaztre`; **Only select repositories**: `kaztre/solidcraft`.
-- Repository permissions: **Issues: Read and write**. Nothing else (Metadata: read is automatic).
-- Pick an expiry (a year at most) and note the date; the Worker stops filing when it expires.
-
-Do not use a classic token or one with Contents access: that would let anyone who reached the
-Worker's secrets push code.
-
-### 3. Deploy the Worker (Cloudflare, free plan is enough)
-
-```sh
-cd tools/report-worker
-npx wrangler login                                   # opens the browser once
-npx wrangler r2 bucket create solidcraft-report-shots   # screenshots; skip and delete the
-                                                     # r2_buckets block in wrangler.jsonc to go without
-npx wrangler secret put GITHUB_TOKEN                 # paste the token from step 2
-openssl rand -hex 16                                 # a tester key; copy it
-npx wrangler secret put REPORT_KEY                   # paste that key
-npx wrangler deploy                                  # prints https://solidcraft-reports.<you>.workers.dev
-```
-
-Check it (this files a real issue):
-
-```sh
-curl -sS https://solidcraft-reports.<you>.workers.dev/report \
-  -H 'Content-Type: application/json' -H "X-Report-Key: <the key>" \
-  -d '{"title":"Test report","body":"Testing the report service.","version":"0.0.0-test.0","os":"curl"}'
-# {"url":"https://github.com/kaztre/solidcraft/issues/1","number":1}
-```
-
-Logs: `npx wrangler tail` or the Worker's page in the Cloudflare dashboard.
-
-### 4. Tell the release workflow where the Worker is
-
-github.com/kaztre/solidcraft/settings ▸ Secrets and variables ▸ Actions:
-
-- **Variables ▸ New repository variable** `REPORT_URL` = `https://solidcraft-reports.<you>.workers.dev/report`
-- **Secrets ▸ New repository secret** `REPORT_KEY` = the key from step 3
-
-Without them the builds still work; Report a bug then only saves and copies, as upstream's does.
+4. **Issues ▸ Labels**: keep `bug`. The issue address asks for it, but GitHub only applies labels
+   for people with write access, so testers' issues arrive unlabelled.
 
 ## Cutting a test release
 
@@ -117,12 +76,10 @@ Settings ▸ Privacy & Security ▸ Open Anyway); on Windows SmartScreen needs M
 
 ## Things to know
 
-- **Reports are public.** The fork is public, so issues and the screenshots they link are visible
-  to anyone. The form says so; tell testers not to send anything confidential.
-- **Spam.** The report URL and key are inside the app, so a determined person could find them.
-  The Worker limits each address to 3 reports a minute and refuses requests without the key. If it
-  is abused: `npx wrangler secret put REPORT_KEY` with a new key (old builds then stop sending, so
-  cut a new release), or delete the Worker.
+- **Testers need a GitHub account** (free) to submit a report. Without one they can still use
+  Copy report and send it to you some other way.
+- **Reports are public.** The fork is public, so issues and their screenshots are visible to
+  anyone. The form says so; tell testers not to send anything confidential.
 - **Upstream changes to `release.yml`** are not picked up automatically; `fork-release.yml` copies
   its build steps. If a test release fails after a rebase, compare the two.
 - **Rebasing.** `sosub` is rebased onto upstream `develop`; the release numbers keep rising because

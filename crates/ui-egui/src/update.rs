@@ -34,7 +34,7 @@ const RELEASE_PREFIXES: [&str; 2] = ["https://github.com/bherbruck/solidcraft/re
 /// A fork's test builds (`.github/workflows/fork-release.yml`) name the fork (`owner/name`) at
 /// build time, so they check the fork's releases instead of the project's. Anything that is not
 /// a plain `owner/name` is ignored.
-fn fork_repo() -> Option<&'static str> {
+pub(crate) fn fork_repo() -> Option<&'static str> {
     option_env!("SOLIDCRAFT_UPDATE_REPO").filter(|r| valid_repo(r))
 }
 

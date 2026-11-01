@@ -82,9 +82,9 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
     let t = crate::theme::Tokens::get();
     let screen = ctx.content_rect();
     let cards = ((screen.width() - 2.0 * t.space_16) / t.form_card_width).clamp(0.5, 2.6);
-    // A fork's test build sends the report to its developer (and still saves a copy here).
-    let sends = super::send::available(app);
-    let primary = if sends { tr("ui.bug_report_send") } else { tr("ui.bug_report_save") };
+    // A fork's test build opens the report as an issue on the fork (and still saves a copy here).
+    let github = super::github::repo(app).is_some();
+    let primary = if github { tr("ui.bug_report_github") } else { tr("ui.bug_report_save") };
     let (closed, action) = ui_kit::Window::new(Id::new("sc_issue_report"), "bug_report", tr_label("Report a bug"))
         .cards(cards)
         .anchor(egui::Align2::CENTER_TOP, vec2(0.0, t.space_16))
@@ -105,8 +105,8 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         let saved = draft.saved.as_ref().map(|id| crate::i18n::format("ui.bug_report_saved", &[("id", id)]));
-                        let local = if sends { tr("ui.bug_report_sends") } else { tr("ui.bug_report_saves_locally") };
-                        let guidance = saved.clone().filter(|_| !sends).unwrap_or_else(|| local.to_string());
+                        let local = if github { tr("ui.bug_report_github_guidance") } else { tr("ui.bug_report_saves_locally") };
+                        let guidance = saved.clone().filter(|_| !github).unwrap_or_else(|| local.to_string());
                         // Reserve the taller wording, so the card (and its footer) keeps its height as the
                         // guidance changes under a click.
                         let width = ui.available_width();
@@ -186,7 +186,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
         ui_kit::Action::Ok => {
             draft.missing_description = draft.description.trim().is_empty();
             // Saved and not edited since: a second click would only make a copy.
-            if !draft.missing_description && draft.saved.is_none() && (!sends || app.issue_report.dir.is_some()) {
+            if !draft.missing_description && draft.saved.is_none() && (!github || app.issue_report.dir.is_some()) {
                 match super::save(app, draft) {
                     Ok(id) => {
                         draft.saved = Some(id);
@@ -196,8 +196,8 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                 }
                 ctx.request_repaint();
             }
-            if sends && !draft.missing_description {
-                super::send::start(app, draft);
+            if github && !draft.missing_description {
+                super::github::open(app, draft, ctx);
                 ctx.request_repaint();
             }
         }
