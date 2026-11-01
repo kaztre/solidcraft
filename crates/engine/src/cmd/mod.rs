@@ -61,6 +61,7 @@ mod mesh;
 mod metadata;
 pub(crate) mod motion;
 mod parts;
+mod parts_library;
 mod script;
 mod section;
 pub(crate) use measure_sel::{measure_items, shape_of};
@@ -298,6 +299,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(motion::COMMANDS.iter());
     v.extend(config::COMMANDS.iter());
     v.extend(parts::COMMANDS.iter());
+    v.extend(parts_library::COMMANDS.iter());
     v.extend(bom::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());
     v.extend(delete::COMMANDS.iter());
