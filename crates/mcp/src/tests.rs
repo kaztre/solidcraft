@@ -178,6 +178,8 @@ fn skill_reference_returns_bundled_text_without_backend_calls() {
         ("solidcraft-mechanisms", "SKILL.md", include_str!("../../../skills/solidcraft-mechanisms/SKILL.md")),
         ("solidcraft-checking", "SKILL.md", include_str!("../../../skills/solidcraft-checking/SKILL.md")),
         ("solidcraft-editing", "SKILL.md", include_str!("../../../skills/solidcraft-editing/SKILL.md")),
+        ("solidcraft-parts-and-versions", "SKILL.md", include_str!("../../../skills/solidcraft-parts-and-versions/SKILL.md")),
+        ("solidcraft-parts-and-versions", "reference.md", include_str!("../../../skills/solidcraft-parts-and-versions/reference.md")),
     ];
     for (skill, file, expected) in docs {
         let args = json!({"skill": skill, "file": file});
@@ -194,7 +196,7 @@ fn skill_reference_returns_bundled_text_without_backend_calls() {
 #[test]
 fn skill_reference_refuses_unknown_names_and_paths_with_available_choices() {
     let mut s = server();
-    let skills = ["solidcraft-checking", "solidcraft-editing", "solidcraft-mechanisms", "solidcraft-modeling"];
+    let skills = ["solidcraft-checking", "solidcraft-editing", "solidcraft-mechanisms", "solidcraft-modeling", "solidcraft-parts-and-versions"];
     for skill in ["unknown", "../solidcraft-modeling", "/tmp/solidcraft-modeling"] {
         let r = raw_tool(&mut s, "skill_reference", json!({"skill": skill}));
         assert_eq!(r["result"]["isError"], true, "{r}");
@@ -1490,6 +1492,8 @@ fn skills_name_only_real_tools_and_commands() {
         include_str!("../../../skills/solidcraft-checking/reference/porting.md"),
         include_str!("../../../skills/solidcraft-mechanisms/SKILL.md"),
         include_str!("../../../skills/solidcraft-mechanisms/reference.md"),
+        include_str!("../../../skills/solidcraft-parts-and-versions/SKILL.md"),
+        include_str!("../../../skills/solidcraft-parts-and-versions/reference.md"),
         include_str!("../../../skills/solidcraft-reporting/SKILL.md"),
         include_str!("../../../skills/solidcraft-reporting/reference/report-template.md"),
     ];

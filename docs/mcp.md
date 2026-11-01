@@ -243,10 +243,11 @@ completely (from the notification area) and start it again to load the servers.
 
 ### Agent skills
 
-[`skills/`](https://github.com/bherbruck/solidcraft/tree/main/skills) holds five [Agent Skills](https://agentskills.io) for agents that model through this server:
+[`skills/`](https://github.com/bherbruck/solidcraft/tree/main/skills) holds six [Agent Skills](https://agentskills.io) for agents that model through this server:
 - `solidcraft-modeling` covers building a new part.
 - `solidcraft-editing` covers changing an existing design.
 - `solidcraft-checking` adds checks for errors SolidCraft does not report, regression tests and porting, next to the other two.
+- `solidcraft-parts-and-versions` teaches people to set up a parts library, keep linked parts up to date, and check in, release and go back to versions of their parts ([docs/versions.md](versions.md)), step by step with the names on screen, or does it for them.
 - `solidcraft-mechanisms` covers assemblies: joints placed by world coordinates, motion links, closed loops such as actuators, contact sets and motion studies, checked against analytic values.
 - `solidcraft-reporting` turns a problem the user hit into a bug report: it reproduces it in a fresh design, shrinks it to a minimal command script, checks the numbers with `measure` and a screenshot, and searches existing issues first.
 
@@ -271,7 +272,7 @@ The `skill_reference` tool returns these documents from the copies built into So
 | `undo`, `redo` | — | Undo / redo one change. |
 | `pending` | — | Bridged: the result of a request that was still running when its call returned (an error starting `still running:`), waiting up to 60 s for it; `done: false` while it runs (call again), `pending: null` when nothing runs. See [Long-running requests](#long-running-requests). |
 | `crash_reports` | `id?`, `limit?` | The crash reports on this computer, newest first; with `id`, the whole report (backtrace, command, recent commands, `design_path`/`replay_path`). See [crash-reports.md](crash-reports.md). |
-| `skill_reference` | `skill`, `file?` (default `reference.md`) | Read a bundled skill document. Skills: `solidcraft-modeling`, `solidcraft-mechanisms`, `solidcraft-editing`, `solidcraft-checking`. |
+| `skill_reference` | `skill`, `file?` (default `reference.md`) | Read a bundled skill document. Skills: `solidcraft-modeling`, `solidcraft-mechanisms`, `solidcraft-editing`, `solidcraft-checking`, `solidcraft-parts-and-versions`. |
 | `running` | - | What the app is running or has queued, for every client (`control.running`, see [control-protocol.md](control-protocol.md#limits)): each request's connection and id, method, command id or a batch's step count, `running_s` and `queued`, never its parameters. Answers at once while the app is busy: ask it when a call timed out before sending a change again. Headless: always `{"running": []}`. |
 | `new_design` | `name?` | Start an empty design. |
 | `open` | `path` | Open a `.solidcraft` design, a STEP file (`.step`/`.stp`) as a new design holding its bodies (an Import base feature), or a 3MF/STL file as mesh bodies. |

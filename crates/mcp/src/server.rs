@@ -34,7 +34,9 @@ and dimension (`sketch.dimension {entities, value}`; values may name parameters)
 (`solid.extrude {distance, operation?: new|join|cut|intersect}`, `solid.revolve`, `solid.fillet {edges: [[x,y,z] point on \
 edge], radius}`, `solid.chamfer`, patterns, mirror, primitives). Use `batch` for several steps at once, \
 `list_commands` for ids and parameter docs, `describe_command` for a command's schemas, `inspect_design` / `measure` to verify, \
-`body_topology` to find edge points, `set_parameter` to drive the design and `screenshot` to look at it. A call whose error \
+`body_topology` to find edge points, `set_parameter` to drive the design and `screenshot` to look at it. When someone asks \
+how to use a parts library or keep versions of their parts (check in, history, revisions, going back), read \
+`skill_reference` for solidcraft-parts-and-versions and teach them the buttons one step at a time. A call whose error \
 starts `still running:` was not cancelled: don't send it again; `pending` waits for its result.";
 
 pub struct Server {
