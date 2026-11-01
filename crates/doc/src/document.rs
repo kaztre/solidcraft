@@ -2757,6 +2757,11 @@ pub struct DesignLink {
     pub path: String,
     /// The Import feature holding the linked design's bodies.
     pub feature: u64,
+    /// The SHA-256 of the design file as it was last read (inserted, relinked or updated), in
+    /// lower-case hex: a different file's content means the part changed since. Older links
+    /// have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 /// A name the design's counter hands out (`Body1`).

@@ -33,7 +33,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          reuse?: bool (default false): insert a free occurrence, reusing an existing link to the same file when available",
     ),
     CommandSpec::new("component.update_links", "Update Links", update_links).icon("update").params(
-        "component?: id or name (default: every linked component) — reads the linked designs again and replaces their bodies where they changed; \
+        "component?: id or name; components?: [ids or names] (default: every linked component) — reads the linked designs again and replaces their bodies where they changed; \
          → updated, unchanged, warnings (also joints whose faces are gone or that no longer solve)",
     ),
     CommandSpec::new("component.relink", "Relink Source", relink).icon("update").params(
@@ -56,7 +56,9 @@ pub static COMMANDS: &[CommandSpec] = &[
          component; refused when its bodies are not the same as the link's; returns component, name, replaced and warnings",
     ),
     CommandSpec::new("component.links", "List Links", list_links).icon("chain").noundo().params(
-        "→ linked components: component, name, path, file (resolved), found (null when the file is on a network location not allowed, \
+        "check?: bool (default false: read each linked file found and compare it with what the link last read, adding current and changed) \
+         → linked components: component, name, path, file (resolved), source (the digest the link last read, null for a link made before \
+         links kept one), current and changed (with check: the file's digest now, and whether it differs; null when unknown), found (null when the file is on a network location not allowed, \
          or names a device: it is not looked for), and then host (the network location) and reason",
     ),
 ];
@@ -88,8 +90,9 @@ pub fn resolve_design_links(doc: &mut Document, from: Option<&str>) {
 /// the design gives their faces (`Feature::link_faces`), with the source's design properties.
 type Linked = (String, solidcraft_io::StepFeature, Vec<Vec<String>>, solidcraft_doc::Metadata);
 
-/// The solid bodies of the design at `file`, evaluated under `validation`, as an Import feature.
-fn linked_bodies(file: &Path, own: Option<&str>, validation: solidcraft_kernel::Validation) -> Result<Linked> {
+/// The solid bodies of the design at `file`, evaluated under `validation`, as an Import feature,
+/// and the digest of the file they were read from (`DesignLink::source`).
+fn linked_bodies(file: &Path, own: Option<&str>, validation: solidcraft_kernel::Validation) -> Result<(Linked, String)> {
     let shown = file.display().to_string();
     if own.is_some_and(|o| absolute(Path::new(o)) == absolute(file)) {
         return Err(EngineError::Other(format!("{shown}: a design can't be linked into itself")));
@@ -100,8 +103,9 @@ fn linked_bodies(file: &Path, own: Option<&str>, validation: solidcraft_kernel::
         let e = e.to_string();
         EngineError::Other(if e.starts_with(&shown) { e } else { format!("{shown}: {e}") })
     })?;
+    let digest = solidcraft_io::content_digest(&bytes);
     let doc = solidcraft_io::read_design(&bytes).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
-    session_bodies(&Session::opened_at_validating(doc, None, Some(&shown), validation), &shown)
+    Ok((session_bodies(&Session::opened_at_validating(doc, None, Some(&shown), validation), &shown)?, digest))
 }
 
 /// The solid bodies of `part`, the design saved as `shown`, as an Import feature.
@@ -156,7 +160,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
             return super::component::copy_occurrence(s, &json!({"component": component, "parent": parent, "translate": translate}));
         }
     }
-    let (design_name, sf, faces, metadata) = linked_bodies(&file, s.path.as_deref(), s.validation())?;
+    let ((design_name, sf, faces, metadata), digest) = linked_bodies(&file, s.path.as_deref(), s.validation())?;
     let name = str_(p, "name").filter(|n| !n.trim().is_empty()).map(str::to_string).unwrap_or(design_name);
     let mut create = json!({"name": name, "activate": false});
     // Clipboard insertion uses reuse even for the first paste, which must stay movable.
@@ -183,7 +187,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         o.transform[3] = [translate.x, translate.y, translate.z, 1.0];
     }
     let path = stored(s.path.as_deref(), &file);
-    s.doc_mut().links.insert(comp, DesignLink { path: file.to_string_lossy().into_owned(), feature: id });
+    s.doc_mut().links.insert(comp, DesignLink { path: file.to_string_lossy().into_owned(), feature: id, source: Some(digest) });
     s.refresh();
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
@@ -197,13 +201,21 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.update_links";
-    let only = if p.get("component").is_some() { Some(component_key(s, p, "component", cmd)?) } else { None };
-    if let Some(c) = only
-        && !s.doc.links.contains_key(&c)
-    {
-        return Err(bad(cmd, "that component is not linked to a design"));
+    let mut only: Option<Vec<u64>> = if p.get("component").is_some() { Some(vec![component_key(s, p, "component", cmd)?]) } else { None };
+    if let Some(list) = p.get("components") {
+        let list = list.as_array().filter(|l| l.len() <= 10_000).ok_or_else(|| bad(cmd, "`components` must be a list of component ids or names"))?;
+        let mut ids = only.take().unwrap_or_default();
+        for c in list {
+            ids.push(component_key(s, &json!({"component": c}), "component", cmd)?);
+        }
+        only = Some(ids);
     }
-    let links: Vec<(u64, DesignLink)> = s.doc.links.iter().filter(|(c, _)| only.is_none_or(|o| o == **c)).map(|(c, l)| (*c, l.clone())).collect();
+    if let Some(c) = only.iter().flatten().find(|c| !s.doc.links.contains_key(c)) {
+        let name = s.doc.components.iter().find(|x| x.id == *c).map_or_else(|| c.to_string(), |x| x.name.clone());
+        return Err(bad(cmd, format!("{name} is not linked to a design")));
+    }
+    let links: Vec<(u64, DesignLink)> =
+        s.doc.links.iter().filter(|(c, _)| only.as_ref().is_none_or(|o| o.contains(c))).map(|(c, l)| (*c, l.clone())).collect();
     let (mut updated, mut unchanged, mut warnings) = (Vec::new(), Vec::new(), Vec::new());
     let count = links.len();
     for (index, (comp, link)) in links.into_iter().enumerate() {
@@ -224,8 +236,14 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         let old = old.clone();
         link_refused(s.path.as_deref(), &link.path).map_err(|e| bad(cmd, format!("{cname}: {e}")))?;
         let file = resolve(s.path.as_deref(), &link.path);
-        let (_, sf, faces, _) = linked_bodies(&file, s.path.as_deref(), s.validation()).map_err(|e| bad(cmd, format!("{cname}: {e}")))?;
+        let ((_, sf, faces, _), digest) = linked_bodies(&file, s.path.as_deref(), s.validation()).map_err(|e| bad(cmd, format!("{cname}: {e}")))?;
         warnings.extend(sf.warnings.iter().cloned());
+        // The file as read now, changed or not, so it isn't reported as changed again.
+        if link.source.as_deref() != Some(digest.as_str())
+            && let Some(l) = s.doc_mut().links.get_mut(&comp)
+        {
+            l.source = Some(digest);
+        }
         let same = matches!(&sf.kind, FeatureKind::Import { step, .. } if *step == old);
         let kept = s.doc.feature(link.feature).map(|f| &f.link_faces);
         if same && kept == Some(&faces) {
@@ -305,7 +323,7 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Read/evaluate the candidate before changing anything. Session::execute owns the single
     // undo step and restores both the document and evaluated state on any later failure.
-    let (_, sf, faces, _) = linked_bodies(&file, s.path.as_deref(), s.validation()).map_err(|e| bad(cmd, e.to_string()))?;
+    let ((_, sf, faces, _), digest) = linked_bodies(&file, s.path.as_deref(), s.validation()).map_err(|e| bad(cmd, e.to_string()))?;
     let geometry_changed = match (s.doc.feature(link.feature).map(|f| &f.kind), &sf.kind) {
         (Some(FeatureKind::Import { step: old, .. }), FeatureKind::Import { step, .. }) => old != step,
         _ => true,
@@ -328,7 +346,7 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
         f.kind = sf.kind;
         f.link_faces = faces;
     }
-    s.doc_mut().links.insert(comp, DesignLink { path: file.to_string_lossy().into_owned(), feature: link.feature });
+    s.doc_mut().links.insert(comp, DesignLink { path: file.to_string_lossy().into_owned(), feature: link.feature, source: Some(digest) });
     s.refresh();
     if let Some(error) = s.model.result(link.feature).and_then(|r| r.error.clone()) {
         return Err(bad(cmd, error));
@@ -353,8 +371,9 @@ fn break_link(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"component": comp, "path": stored(s.path.as_deref(), &resolve(s.path.as_deref(), &link.path))}))
 }
 
-fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
-    let links: Vec<Value> = s
+fn list_links(s: &mut Session, p: &Value) -> Result<Value> {
+    let check = p.get("check").and_then(Value::as_bool).unwrap_or(false);
+    let mut links: Vec<Value> = s
         .doc
         .links
         .iter()
@@ -375,6 +394,21 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
             }
         })
         .collect();
+    for (link, (_, l)) in links.iter_mut().zip(s.doc.links.iter()) {
+        link["source"] = json!(l.source);
+        // `check`: read each file found and compare it with what the link last read.
+        if check && link["found"] == true {
+            let file = link["file"].as_str().unwrap_or_default().to_string();
+            let now = solidcraft_io::vfs::read_design_path(&file, s.path.as_deref(), solidcraft_io::MAX_DESIGN_BYTES)
+                .ok()
+                .map(|b| solidcraft_io::content_digest(&b));
+            link["current"] = json!(now);
+            link["changed"] = match (&l.source, &now) {
+                (Some(was), Some(now)) => json!(was != now),
+                _ => Value::Null,
+            };
+        }
+    }
     Ok(json!({"links": links}))
 }
 
@@ -395,6 +429,47 @@ mod tests {
 
     fn volume(s: &mut Session) -> f64 {
         run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN)
+    }
+
+    /// A link remembers the file it read, so a changed part file is noticed, and updating the
+    /// parts named brings in their new shapes and leaves the others as they were.
+    #[test]
+    fn a_changed_part_file_is_noticed_and_updating_only_the_named_parts_brings_it_in() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-source-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (plate, lid) = (dir.join("plate.solidcraft"), dir.join("lid.solidcraft"));
+        save_box(&plate, 2.0);
+        save_box(&lid, 1.0);
+        let mut s = Session::default();
+        let a = run(&mut s, "component.insert_design", json!({"path": plate}))["component"].as_u64().unwrap();
+        run(&mut s, "component.insert_design", json!({"path": lid, "translate": [50, 0, 0]}));
+        let digest = |p: &Path| solidcraft_io::content_digest(&std::fs::read(p).unwrap());
+        assert_eq!(s.doc.links[&a].source.as_deref(), Some(digest(&plate).as_str()), "the link keeps what it read");
+        let changed = |s: &mut Session| -> Vec<String> {
+            run(s, "component.links", json!({"check": true}))["links"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|l| l["changed"] == true)
+                .map(|l| l["name"].as_str().unwrap().to_string())
+                .collect()
+        };
+        assert!(changed(&mut s).is_empty(), "nothing changed yet");
+        let before = volume(&mut s);
+        save_box(&plate, 4.0);
+        save_box(&lid, 3.0);
+        assert_eq!(changed(&mut s).len(), 2, "both files changed");
+        let r = run(&mut s, "component.update_links", json!({"components": [a]}));
+        assert_eq!(r["updated"].as_array().unwrap().len(), 1, "{r}");
+        assert!((volume(&mut s) - (before + 10.0 * 20.0 * 2.0)).abs() < 1e-6, "the plate grew by 2 mm");
+        assert_eq!(changed(&mut s), ["lid"], "the plate is current, the lid still waits");
+        // A link from before links kept a digest is unknown, not changed.
+        s.doc_mut().links.values_mut().for_each(|l| l.source = None);
+        let unknown = run(&mut s, "component.links", json!({"check": true}));
+        assert!(unknown["links"].as_array().unwrap().iter().all(|l| l["changed"].is_null()), "{unknown}");
+        assert!(s.execute("component.update_links", &json!({"components": ["no such part"]})).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// #6860: Save As changes the file's folder, not the targets kept in the edit history.
@@ -727,7 +802,7 @@ mod tests {
         std::fs::copy(&part, dir.join("parts").join("NUL.solidcraft")).unwrap();
         let before = volume(&mut a);
         for link in crafted.iter().chain(&devices) {
-            a.doc_mut().links.insert(comp, DesignLink { path: link.to_string(), feature });
+            a.doc_mut().links.insert(comp, DesignLink { path: link.to_string(), feature, source: None });
             let calls = solidcraft_io::vfs::file_calls();
             let listed = run(&mut a, "component.links", json!({}));
             let entry = &listed["links"][0];
@@ -745,7 +820,7 @@ mod tests {
         // Allowed (Allow once, a preference, …), the same link is read as any other.
         #[cfg(unix)]
         {
-            a.doc_mut().links.insert(comp, DesignLink { path: crafted[0].to_string(), feature });
+            a.doc_mut().links.insert(comp, DesignLink { path: crafted[0].to_string(), feature, source: None });
             solidcraft_io::vfs::allowing_hosts(&["EVIL.example".to_string()], || {
                 let listed = run(&mut a, "component.links", json!({}));
                 assert_eq!(listed["links"][0]["found"], true, "{listed}");
@@ -755,7 +830,7 @@ mod tests {
         }
         // A local link, relative or absolute, is found and read as before.
         for local in ["parts/plate.solidcraft".to_string(), part.to_string_lossy().to_string()] {
-            a.doc_mut().links.insert(comp, DesignLink { path: local.clone(), feature });
+            a.doc_mut().links.insert(comp, DesignLink { path: local.clone(), feature, source: None });
             assert_eq!(run(&mut a, "component.links", json!({}))["links"][0]["found"], true, "{local}");
             assert_eq!(run(&mut a, "component.update_links", json!({}))["unchanged"], json!(["plate"]), "{local}");
         }
