@@ -61,6 +61,7 @@ pub const SKIPPED_MODULES: &[(&str, &str)] = &[
 /// Functions, in modules that also decide geometry, whose job is the display mesh itself, a
 /// preview, or a mesh body.
 pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
+    ("crates/doc/src/document.rs:MeshData::eq", "mesh bodies: whether a mesh import's data is the same"),
     ("crates/doc/src/eval.rs:ModelBody::display_plan", "the display plan"),
     ("crates/doc/src/eval.rs:ModelBody::mesh", "the display mesh"),
     ("crates/doc/src/eval.rs:ModelBody::mesh_in_place", "the display mesh where the body stands"),
