@@ -883,6 +883,11 @@ impl<'b, 'a> Builder<'b, 'a> {
         }
         let extent = self.extent(&loops)?;
         let (surface, reversed) = swept::map_surface(&step_surface, &extent, self.tol).map_err(|m| format!("face #{id}: {m}"))?;
+        // A spline closed around v only, swapped to close around u, has its normal reversed.
+        let (surface, reversed) = match seams::closed_around_u(&surface).map_err(|m| format!("face #{id}: {m}"))? {
+            Some(swapped) => (swapped, !reversed),
+            None => (surface, reversed),
+        };
         // Loops relative to the record's natural normal: the face's normal is STEP's surface
         // normal when same_sense, and the record's is STEP's unless `reversed`.
         let sense = same_sense != reversed;

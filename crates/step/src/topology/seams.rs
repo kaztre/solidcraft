@@ -8,8 +8,9 @@
 //! the seam back. A face on a B-spline surface that closes on itself around u (its first and
 //! last control columns the same) gets a seam the same way, along the surface's own boundary
 //! column (u at the start of its knots), the loops split there where they have no vertex on it;
-//! the period is the width of its knots. A torus face winding without a seam, and a spline
-//! closed in v or both ways, are refused for now.
+//! the period is the width of its knots. A spline closed around v only has its u and v swapped
+//! first, so it closes around u. A torus face winding without a seam, and a spline closed both
+//! ways, are refused for now.
 //!
 //! A face bounded by a slit alone (a loop out along edges and straight back, of no (u, v) area)
 //! on a closed surface is all of that surface less a cut of none: its slit is made its seams
@@ -238,12 +239,77 @@ fn restarted(surface: &BSurface, s: f64, period: f64) -> Option<BSurface> {
     })
 }
 
+/// A B-spline surface closed on itself around v only (a surface of revolution written with v the
+/// angle) with its u and v swapped, so it closes around u, the way seams and the start of a
+/// closed spline are found: the same points, its normal the other way. `None` for any other
+/// surface.
+pub(super) fn closed_around_u(surface: &BSurface) -> R<Option<BSurface>> {
+    fn swap<T: Copy>(rows: &[Vec<T>]) -> Option<Vec<Vec<T>>> {
+        (0..rows.first()?.len()).map(|j| rows.iter().map(|r| r.get(j).copied()).collect()).collect()
+    }
+    if !matches!(surface, BSurface::Spline { .. } | BSurface::RationalSpline { .. }) {
+        return Ok(None);
+    }
+    let dom = SurfaceEval::new(surface).map_err(|e| e.to_string())?.domain();
+    let (None, Some(_)) = (dom.period[0], dom.period[1]) else { return Ok(None) };
+    Ok(match surface {
+        BSurface::Spline { u_knots, v_knots, points } => {
+            swap(points).map(|points| BSurface::Spline { u_knots: v_knots.clone(), v_knots: u_knots.clone(), points })
+        }
+        BSurface::RationalSpline { u_knots, v_knots, homogeneous } => {
+            swap(homogeneous).map(|homogeneous| BSurface::RationalSpline { u_knots: v_knots.clone(), v_knots: u_knots.clone(), homogeneous })
+        }
+        _ => None,
+    })
+}
+
+/// Where a closed spline's seam should start so it runs clear of a winding face's `holes` (their
+/// reaches along u, unwrapped): `None` when none crosses the start `u0` (or the holes leave no
+/// room), else the middle of the widest stretch of u between them.
+fn clear_of_holes(holes: &[(f64, f64)], u0: f64, period: f64) -> Option<f64> {
+    let clear = 1e-6 * period;
+    // Each hole from its start, measured from `u0` round one period.
+    let mut spans: Vec<(f64, f64)> = holes
+        .iter()
+        .filter(|(lo, hi)| hi - lo < period)
+        .map(|&(lo, hi)| {
+            let s = (lo - u0).rem_euclid(period);
+            (s, s + (hi - lo))
+        })
+        .collect();
+    if !spans.iter().any(|&(s, e)| s < clear || e > period - clear) {
+        return None;
+    }
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    // The widest gap between one hole's end (the furthest reached so far) and the next's start,
+    // and round past the period to the first's.
+    let first = spans.first()?.0;
+    let mut reach = f64::NEG_INFINITY;
+    let mut best: Option<(f64, f64)> = None;
+    let mut gap = |a: f64, b: f64| {
+        if b - a > best.map_or(2.0 * clear, |(x, y)| y - x) {
+            best = Some((a, b));
+        }
+    };
+    for &(s, e) in &spans {
+        if reach.is_finite() {
+            gap(reach, s);
+        }
+        reach = reach.max(e);
+    }
+    gap(reach, first + period);
+    let (a, b) = best?;
+    Some(u0 + (0.5 * (a + b)).rem_euclid(period))
+}
+
 impl Builder<'_, '_> {
     /// Start every B-spline surface closed around u that a face lies across the start of, without
     /// winding round it, in the middle of the widest stretch of u the face leaves free: the face's
     /// pcurves then run inside the surface's knots, as a kernel's trims have to (one crossing the
-    /// start had its pcurve clamped there, mm off its edge). Exact ([`restarted`]). Returns how
-    /// many surfaces were started anew.
+    /// start had its pcurve clamped there, mm off its edge). A face that winds round has its seam
+    /// along the start: one of its holes across the start (a rib's footprint on a grip) has it
+    /// started in the middle of the widest stretch between its holes instead. Exact
+    /// ([`restarted`]). Returns how many surfaces were started anew.
     pub(super) fn start_splines_clear_of_faces(&mut self) -> R<usize> {
         let mut turned = 0;
         for fi in 0..self.faces.len() {
@@ -259,9 +325,11 @@ impl Builder<'_, '_> {
             // widest loop bounds the face.
             let mut widest: Option<(f64, f64)> = None;
             let mut winds = false;
+            let mut holes: Vec<(f64, f64)> = Vec::new();
             for l in &face.loops {
                 let LoopB::Edges(es) = l else { continue };
-                winds |= self.winding(&eval, es, [Some(period), None])?[0] != 0;
+                let around = self.winding(&eval, es, [Some(period), None])?[0] != 0;
+                winds |= around;
                 let mut last: Option<f64> = None;
                 let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
                 for &(e, _) in es {
@@ -276,9 +344,22 @@ impl Builder<'_, '_> {
                         last = Some(u);
                     }
                 }
+                if !around && lo <= hi {
+                    holes.push((lo, hi));
+                }
                 if hi - lo > widest.map_or(f64::NEG_INFINITY, |(a, b)| b - a) {
                     widest = Some((lo, hi));
                 }
+            }
+            if winds {
+                let Some(at) = clear_of_holes(&holes, u0, period) else { continue };
+                let Some(surface) = restarted(&face.surface, at, period) else { continue };
+                if let Some(f) = self.faces.get_mut(fi) {
+                    f.surface = surface;
+                    f.extent = None;
+                }
+                turned += 1;
+                continue;
             }
             let Some((lo, hi)) = widest else { continue };
             // Across the start: a whole number of periods from it lies inside the reach, clear of
@@ -477,7 +558,9 @@ impl Builder<'_, '_> {
     /// whether it runs from `a` to `b`.
     fn seam_edge(&mut self, a: u32, b: u32, ax: &Axis, eval: &SurfaceEval, check: bool) -> R<(u32, bool)> {
         let (pa, pb) = (self.vpoint(a)?, self.vpoint(b)?);
-        if pa.dist(pb) <= self.tol {
+        // A band narrower than the file's tolerance (a sliver along a torus's inner equator) still
+        // takes its seam: only one of no length at all is refused.
+        if pa.dist(pb) <= super::MIN_TOLERANCE {
             return Err("a seam of no length".into());
         }
         let (curve, interval, along) = match &ax.kind {
@@ -553,22 +636,28 @@ impl Builder<'_, '_> {
         if !(interval[0] < interval[1]) {
             return Err("a degenerate seam".into());
         }
-        // On the surface: its middle within the tolerance (a ruling, a meridian).
+        // On the surface: its middle within the tolerance (a ruling, a meridian), or within
+        // as far as its ends lie off it (a thread's helices a few hundredths of a mm off their
+        // cone, in a file of 1e-5 mm), its tolerance that far.
         let c = CurveEval::new(&curve).map_err(|m| m.to_string())?;
+        let off_surface = |p: Vec3| eval.project(p, None, f64::INFINITY).and_then(|q| eval.point(q)).map_or(f64::INFINITY, |s| s.dist(p));
+        let mut tolerance = self.tol;
         if check {
             let m = c.point(0.5 * (interval[0] + interval[1])).ok_or("seam point")?;
-            let off = eval.project(m, None, f64::INFINITY).and_then(|q| eval.point(q)).map_or(f64::INFINITY, |s| s.dist(m));
-            if !(off <= self.tol) {
+            let off = off_surface(m);
+            let ends = off_surface(pa).max(off_surface(pb));
+            if !(off <= self.tol + ends) {
                 return Err(unsupported("a seam off its surface: loops with no vertices at one angle"));
             }
+            tolerance = tolerance.max(1.5 * off);
         }
-        let i = self.new_edge(curve, interval, if along { [a, b] } else { [b, a] })?;
+        let i = self.new_edge(curve, interval, if along { [a, b] } else { [b, a] }, tolerance)?;
         Ok((i, along))
     }
 
-    /// A new edge on `curve` over `interval` between `vertices`, each vertex's tolerance raised to
-    /// cover its gap to the curve's end.
-    fn new_edge(&mut self, curve: BCurve, interval: [f64; 2], vertices: [u32; 2]) -> R<u32> {
+    /// A new edge on `curve` over `interval` between `vertices`, of `tolerance`, each vertex's
+    /// tolerance raised to cover its gap to the curve's end.
+    fn new_edge(&mut self, curve: BCurve, interval: [f64; 2], vertices: [u32; 2], tolerance: f64) -> R<u32> {
         let c = CurveEval::new(&curve).map_err(|m| m.to_string())?;
         for (t, v) in interval.into_iter().zip(vertices) {
             let gap = c.point(t).ok_or("seam point")?.dist(self.vpoint(v)?);
@@ -577,7 +666,7 @@ impl Builder<'_, '_> {
             }
         }
         let i = index(self.edges.len())?;
-        self.edges.push(EdgeB { curve, interval, vertices, tolerance: self.tol, form: None });
+        self.edges.push(EdgeB { curve, interval, vertices, tolerance, form: None });
         Ok(i)
     }
 
@@ -801,12 +890,12 @@ impl Builder<'_, '_> {
                 return Ok(None);
             }
             let rest = BCurve::Circle { frame: Frame { origin: arr(c), x_axis: arr(x), y_axis: arr(y) }, radius };
-            round.push((self.new_edge(rest, [0.0, theta], [b, a])?, true));
+            round.push((self.new_edge(rest, [0.0, theta], [b, a], self.tol)?, true));
         }
         let (c, n) = other;
         let Some(x) = (pa - c).normalized() else { return Ok(None) };
         let full = BCurve::Circle { frame: Frame { origin: arr(c), x_axis: arr(x), y_axis: arr(n.cross(x)) }, radius: (pa - c).len() };
-        let second = self.new_edge(full, [0.0, TAU], [a, a])?;
+        let second = self.new_edge(full, [0.0, TAU], [a, a], self.tol)?;
         let mut back = round.clone();
         super::reverse(&mut back);
         let mut merged = round;
