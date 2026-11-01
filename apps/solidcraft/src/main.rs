@@ -359,6 +359,7 @@ fn services(cc: &eframe::CreationContext<'_>) -> Services {
         restore_file: None,
         download_design: None,
         easyprint_upload: Some(std::sync::Arc::new(easyprint_upload)),
+        send_report: report_service().map(|_| std::sync::Arc::new(send_report) as solidcraft_ui_egui::issue_report::SendReport),
         browser_files: None,
         agent_http: Some(std::sync::Arc::new(agent_http)),
         secrets: Some(std::sync::Arc::new(Keychain)),
@@ -470,6 +471,32 @@ fn easyprint_upload(name: &str, bytes: Vec<u8>, done: std::sync::mpsc::Sender<Re
             timeout_s: 180,
         };
         let _ = done.send(agent_http(&request).and_then(|(status, body)| easyprint::parse_import_response(status, &body)));
+    });
+}
+
+/// Where a fork's test build sends reviewed bug reports (docs/fork-releases.md): the release
+/// workflow sets `SOLIDCRAFT_REPORT_URL` (HTTPS only); every other build has none, and Report a
+/// bug only saves and copies.
+fn report_service() -> Option<&'static str> {
+    option_env!("SOLIDCRAFT_REPORT_URL").filter(|u| u.starts_with("https://") && !u.contains(char::is_whitespace))
+}
+
+/// Send report: POST the reviewed report (JSON, built by the UI) to [`report_service`] through
+/// [`agent_http`] (no redirects, a timeout, no cookies) and answer with the service's reply. The
+/// optional `SOLIDCRAFT_REPORT_KEY` only keeps casual spam out: it ships inside the app.
+fn send_report(body: Vec<u8>, done: std::sync::mpsc::Sender<solidcraft_ui_egui::issue_report::SendAnswer>) {
+    let Some(url) = report_service() else {
+        let _ = done.send(Err("this build has no report service".into()));
+        return;
+    };
+    std::thread::spawn(move || {
+        let mut headers = vec![("Content-Type".into(), "application/json".into()), ("Accept".into(), "application/json".into())];
+        if let Some(key) = option_env!("SOLIDCRAFT_REPORT_KEY").filter(|k| !k.is_empty()) {
+            headers.push(("X-Report-Key".into(), key.into()));
+        }
+        let request =
+            solidcraft_ui_egui::agent_chat::backend::HttpRequest { method: "POST", url: url.into(), headers, body: Some(body), timeout_s: 60 };
+        let _ = done.send(agent_http(&request));
     });
 }
 
