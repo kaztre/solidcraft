@@ -11,7 +11,8 @@
 #   - check this repository's releases for updates (SOLIDCRAFT_UPDATE_REPO), so testers are
 #     offered every newer test build in the app;
 #   - open Report a bug as a new issue on this repository in the tester's browser (Open on GitHub).
-# Nothing is signed: testers see Gatekeeper / SmartScreen warnings (docs/fork-releases.md).
+# The Mac app is signed and notarized when this repository has the APPLE_* secrets; until then,
+# and on Windows, testers see Gatekeeper / SmartScreen warnings (docs/fork-releases.md).
 # The jobs follow release.yml's; when that changes upstream, carry the change over here.
 name: Fork test release
 
@@ -175,10 +176,24 @@ jobs:
         with:
           name: macos-bin-x86_64
           path: target/x86_64-apple-darwin/release
-      - name: Join, package and check (dmg, CLI zip; ad-hoc signed, not notarized)
+      - name: Set up Developer ID signing and notarization
+        # Optional until this repository has the APPLE_* secrets (docs/fork-releases.md, "Mac
+        # signing"). Without them the app keeps its ad-hoc signature and macOS blocks the first
+        # open until the tester allows it.
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: packaging/macos/signing.sh --setup
+      - name: Join, sign, package and check (dmg, CLI zip)
         run: |
           chmod +x target/*-apple-darwin/release/solidcraft target/*-apple-darwin/release/solidcraft-cli target/*-apple-darwin/release/solvecraft-cli
-          packaging/macos/package.sh --arch universal --skip-build
+          packaging/macos/package.sh --arch universal --skip-build ${MACOS_SIGN_IDENTITY:+--sign}
+      - name: Remove the signing keychain and API key
+        if: always()
+        run: packaging/macos/signing.sh --cleanup
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-macos
@@ -249,6 +264,8 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
       NOTES: ${{ inputs.notes }}
+      # The Mac app is signed and notarized once the APPLE_* secrets exist, and opens normally.
+      MAC_SIGNED: ${{ secrets.APPLE_CERTIFICATE_P12 != '' }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
     steps:
@@ -279,7 +296,11 @@ jobs:
             echo
             echo "\`SHA256SUMS.txt\` is for the app's own update check; you don't need it."
             echo
-            echo "These builds are not signed. macOS: right-click SolidCraft > Open the first time (or System Settings > Privacy & Security > Open Anyway). Windows: More info > Run anyway."
+            if [ "$MAC_SIGNED" != true ]; then
+              echo "**Mac, first open only:** drag SolidCraft to Applications and open it. When macOS says it can't check it, press **Done**, then open **System Settings > Privacy & Security**, scroll down to \"SolidCraft was blocked\" and press **Open Anyway** (then your password). Or run this once in Terminal: \`xattr -dr com.apple.quarantine /Applications/SolidCraft.app\`"
+              echo
+            fi
+            echo "**Windows:** the build isn't signed, so SmartScreen may warn you: press More info > Run anyway."
             echo
             echo "Once installed, the app offers newer test builds itself. Found a problem? Use **Report a bug** in the title bar, then **Open on GitHub** (you need a free GitHub account to submit it)."
           } >notes.md
