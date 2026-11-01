@@ -412,9 +412,6 @@ pub struct Services {
     /// Upload a model to EasyPrint (Printables' slicer in the browser) and answer with the address
     /// to open (`easyprint_ui`); None: this host can't, and the menu doesn't offer it.
     pub easyprint_upload: Option<easyprint_ui::Upload>,
-    /// Send a reviewed bug report to this build's report service (a fork's test builds,
-    /// docs/fork-releases.md); None: Report a bug only saves and copies.
-    pub send_report: Option<issue_report::SendReport>,
 }
 
 /// The view before a sketch opened and the view that faced the sketch then (#7038).
