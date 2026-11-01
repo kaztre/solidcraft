@@ -32,6 +32,7 @@ fn kit_table_limit(id: egui::Id) -> Option<f32> {
         egui::Id::new("sc_bom"),
         egui::Id::new("sc_gesture_editor"),
         egui::Id::new("sc_params_dialog"),
+        egui::Id::new("sc_parts_library"),
         egui::Id::new("sc_material_card_review"),
         egui::Id::new(("sc_dialog", "CONFIGURATIONS")),
         egui::Id::new(("sc_dialog", "MOTION STUDY")),

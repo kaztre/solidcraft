@@ -196,6 +196,7 @@ pub mod open_elsewhere;
 pub(crate) mod open_meshing;
 pub mod panel_runtime;
 pub mod params_dialog;
+pub mod parts_library;
 pub mod personal_sheet_rules;
 pub(crate) mod pick_index;
 pub(crate) mod place_gizmo;
@@ -445,6 +446,9 @@ pub struct Services {
     pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
     /// Open a dialog asking for a program (a slicer); `None` when the host has no such dialog.
     pub pick_program: Option<Box<dyn Fn() -> FilePickerFuture>>,
+    /// Open a dialog asking for a folder, with this title (the parts library's); `None` when the
+    /// host has no such dialog.
+    pub pick_folder: Option<Box<dyn Fn(&str) -> FilePickerFuture>>,
     pub show_in_folder: Option<Box<dyn Fn(&str)>>,
     /// Where the host reads the anti-aliasing preference at start (a small JSON file).
     pub graphics_path: Option<String>,
@@ -557,6 +561,8 @@ pub struct SolveApp {
     pub sketch_report: Option<sketch_report::SketchReport>,
     /// The Bill of Materials window, when open.
     pub bom: Option<bom_panel::BomPanel>,
+    /// The Parts Library window, when open.
+    pub parts_library: Option<parts_library::PartsLibrary>,
     material_card_review: Option<material_card_review::ReviewWindow>,
     /// Context menus, rename box and Properties window.
     pub menu: context_menu::MenuState,
@@ -814,6 +820,7 @@ impl SolveApp {
             design_properties: None,
             sketch_report: None,
             bom: None,
+            parts_library: None,
             material_card_review: None,
             menu: context_menu::MenuState::default(),
             gesture: mouse_gesture::State::default(),
@@ -1868,6 +1875,10 @@ impl SolveApp {
         }
         if id == "sketch.edit" {
             self.start_sketch_edit(opener);
+            return;
+        }
+        if id == "library.parts.search" {
+            parts_library::open(self);
             return;
         }
         if id == "sketch.finish" {
@@ -3164,6 +3175,7 @@ impl SolveApp {
         design_properties::show(self, ui.ctx());
         sketch_report::show(self, ui.ctx());
         bom_panel::show(self, ui.ctx());
+        parts_library::show(self, ui.ctx());
         material_card_review::show(self, ui.ctx());
         recovery_ui::show(self, ui.ctx());
         stand_up::show(self, ui.ctx());

@@ -769,6 +769,18 @@ impl<R: Read + Seek> DesignContainerReader<R> {
         thumbnail::read(&mut self.reader).ok()
     }
 
+    /// The design's own properties (its top-level `metadata`), from the document part alone: no
+    /// blobs are read and nothing is migrated or evaluated (the parts library lists them).
+    pub fn properties(&mut self) -> Option<serde_json::Map<String, serde_json::Value>> {
+        #[derive(serde::Deserialize)]
+        struct Head {
+            #[serde(default)]
+            metadata: serde_json::Map<String, serde_json::Value>,
+        }
+        let document = self.reader.document(16 << 20).ok()?;
+        serde_json::from_slice::<Head>(&document).ok().map(|h| h.metadata)
+    }
+
     /// The saved model, when this build wrote it for exactly this document.
     pub fn geometry(&mut self) -> Option<solidcraft_doc::SavedModel> {
         let document = self.reader.document(16 << 20).ok()?;

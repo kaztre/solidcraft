@@ -70,6 +70,7 @@ pub mod libraries;
 pub mod mass_properties;
 pub mod motion;
 pub mod panels;
+pub mod parts_library;
 pub mod print_face;
 pub mod render;
 pub mod render_lights;
