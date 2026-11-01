@@ -306,7 +306,7 @@ fn installation_refreshes_the_release_and_verifies_the_final_package() {
         let n = Net {
             feed: None,
             get: Arc::new(move |url| {
-                if url == super::LATEST_API {
+                if url == super::latest_api() {
                     return answer.clone();
                 }
                 assert_eq!(url, format!("{chosen_base}{SUMS}"), "checksums from the chosen release");

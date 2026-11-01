@@ -30,19 +30,46 @@ use crate::ui_kit;
 
 /// The repository releases come from.
 pub const REPO: &str = "tangency-labs/solidcraft";
-/// The one request an update check makes.
-pub const LATEST_API: &str = "https://api.github.com/repos/tangency-labs/solidcraft/releases/latest";
-/// Where Download goes when no package fits this installation.
-pub const RELEASES_PAGE: &str = "https://github.com/tangency-labs/solidcraft/releases/latest";
 /// Release pages and assets must be on GitHub, under this repository. The repository moved to the
 /// `tangency-labs` organisation, so releases may still name either owner (older releases and the
 /// links GitHub redirects keep the old one).
 const RELEASE_PREFIXES: [&str; 2] = ["https://github.com/bherbruck/solidcraft/releases/", "https://github.com/tangency-labs/solidcraft/releases/"];
 
-/// A release page or asset URL: github.com, one of the two owners, exactly `solidcraft`, then
-/// `/releases/` (the trailing slash rules out look-alike names such as `solidcraft-evil`).
+/// A fork's test builds (`.github/workflows/fork-release.yml`) name the fork (`owner/name`) at
+/// build time, so they check the fork's releases instead of the project's. Anything that is not
+/// a plain `owner/name` is ignored.
+fn fork_repo() -> Option<&'static str> {
+    option_env!("SOLIDCRAFT_UPDATE_REPO").filter(|r| valid_repo(r))
+}
+
+/// `owner/name`, each part made of letters, digits, `-`, `_` and `.` (and not `.`/`..`).
+fn valid_repo(repo: &str) -> bool {
+    let part = |p: &str| {
+        !p.is_empty() && p.len() <= 100 && p != "." && p != ".." && p.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    };
+    matches!(repo.split_once('/'), Some((owner, name)) if part(owner) && part(name))
+}
+
+/// The one request an update check makes.
+pub fn latest_api() -> String {
+    format!("https://api.github.com/repos/{}/releases/latest", fork_repo().unwrap_or(REPO))
+}
+
+/// Where Download goes when no package fits this installation.
+pub fn releases_page() -> String {
+    format!("https://github.com/{}/releases/latest", fork_repo().unwrap_or(REPO))
+}
+
+/// A release page or asset URL: github.com, one of the two owners (or this build's fork), exactly
+/// `solidcraft`, then `/releases/` (the trailing slash rules out look-alike names such as
+/// `solidcraft-evil`).
 fn is_release_url(url: &str) -> bool {
+    is_release_url_of(url, fork_repo())
+}
+
+fn is_release_url_of(url: &str, fork: Option<&str>) -> bool {
     RELEASE_PREFIXES.iter().any(|p| url.starts_with(p))
+        || fork.filter(|r| valid_repo(r)).is_some_and(|r| url.starts_with(&format!("https://github.com/{r}/releases/")))
 }
 
 /// While the app stays open, automatic checks run once a day (every start checks too).
@@ -111,18 +138,28 @@ pub fn comparable(v: &semver::Version) -> semver::Version {
 /// candidate and nightly releases are all tagged `v<version>`), else, for a development build or
 /// a string that is not a version, the release history.
 pub fn release_notes_url(version: &str, release_build: bool) -> String {
-    const HISTORY: &str = "https://github.com/tangency-labs/solidcraft/releases";
+    release_notes_url_of(version, release_build, fork_repo())
+}
+
+fn release_notes_url_of(version: &str, release_build: bool, fork: Option<&str>) -> String {
+    let history = format!("https://github.com/{}/releases", fork.filter(|r| valid_repo(r)).unwrap_or("tangency-labs/solidcraft"));
     if release_build && parse_version(version).is_some() && version.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+')) {
-        format!("{HISTORY}/tag/v{version}")
+        format!("{history}/tag/v{version}")
     } else {
-        HISTORY.to_string()
+        history
     }
 }
 
-/// `latest` (a release tag) is a stable release newer than the `current` build.
+/// A fork's test build (`0.24.0-test.7`, numbered by `.github/workflows/fork-release.yml`).
+fn test_build(v: &semver::Version) -> bool {
+    v.pre.as_str().starts_with("test.")
+}
+
+/// `latest` (a release tag) is a stable release newer than the `current` build, or, for a fork's
+/// test build, a newer test build (they are numbered in order: `-test.8` follows `-test.7`).
 pub fn is_newer(latest: &str, current: &str) -> bool {
     let (Some(latest), Some(current)) = (parse_version(latest), parse_version(current)) else { return false };
-    latest.pre.is_empty() && latest > comparable(&current)
+    (latest.pre.is_empty() || (test_build(&latest) && test_build(&current))) && latest > comparable(&current)
 }
 
 /// This build's version: the release workflow's `SOLIDCRAFT_VERSION` (with any nightly suffix)
@@ -515,7 +552,7 @@ impl Release {
             notes.truncate(cut);
             notes.push_str("\n\n…");
         }
-        let page = Some(s("html_url")).filter(|u| is_release_url(u)).unwrap_or_else(|| RELEASES_PAGE.to_string());
+        let page = Some(s("html_url")).filter(|u| is_release_url(u)).unwrap_or_else(releases_page);
         let assets = v
             .get("assets")
             .and_then(Value::as_array)
@@ -764,7 +801,7 @@ fn fetch_latest(feed: Option<&Path>, http: Option<&HttpGet>) -> Result<Release, 
             file.take(MAX_RELEASE_BYTES as u64 + 1).read_to_end(&mut body).map_err(|e| FetchError::Failed(e.to_string()))?;
             body
         }
-        (None, Some(get)) => get(LATEST_API)?,
+        (None, Some(get)) => get(&latest_api())?,
         (None, None) => return Err(FetchError::Failed("no network client".into())),
     };
     Release::parse(&body)

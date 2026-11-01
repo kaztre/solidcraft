@@ -1,0 +1,284 @@
+# Test releases of this fork, for testers on other computers (docs/fork-releases.md).
+#
+# Run it from the Actions tab (Fork test release > Run workflow, branch sosub) or:
+#   gh workflow run fork-release.yml --repo kaztre/solidcraft --ref sosub -f notes="What changed"
+#
+# It builds macOS (universal .dmg), Windows x64 (.msi and portable .zip) and Linux x86_64 and
+# aarch64 (AppImage, .deb, .rpm, .tar.gz), numbers the build <Cargo.toml version>-test.<run>, and
+# publishes it as this repository's latest release. The apps it builds:
+#   - check this repository's releases for updates (SOLIDCRAFT_UPDATE_REPO), so testers are
+#     offered every newer test build in the app;
+#   - send Report a bug to the report service in the REPORT_URL repository variable
+#     (tools/report-worker), with the REPORT_KEY secret, when those are set.
+# Nothing is signed: testers see Gatekeeper / SmartScreen warnings (docs/fork-releases.md).
+# The jobs follow release.yml's; when that changes upstream, carry the change over here.
+name: Fork test release
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "What changed, for testers (shown on the release page)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  # Baked into every binary at build time (crates/ui-egui/src/update.rs, apps/solidcraft/src/main.rs).
+  SOLIDCRAFT_UPDATE_REPO: ${{ github.repository }}
+  SOLIDCRAFT_REPORT_URL: ${{ vars.REPORT_URL }}
+  SOLIDCRAFT_REPORT_KEY: ${{ secrets.REPORT_KEY }}
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      date: ${{ steps.v.outputs.date }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: v
+        name: Resolve version
+        run: |
+          . packaging/env.sh
+          # Test builds are numbered in order, and the app offers a newer one (update.rs, is_newer).
+          VERSION="${VERSION%%-*}-test.$GITHUB_RUN_NUMBER"
+          { echo "version=$VERSION"; echo "date=$(date -u +%Y-%m-%d)"; } >>"$GITHUB_OUTPUT"
+          {
+            echo "### SolidCraft v$VERSION (\`${GITHUB_SHA::9}\`, $GITHUB_REF_NAME)"
+            if [ -n "$SOLIDCRAFT_REPORT_URL" ]; then echo "Report a bug sends to $SOLIDCRAFT_REPORT_URL"; else echo "No REPORT_URL variable: Report a bug only saves locally."; fi
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  # The app icon in every size, for the Windows job.
+  icons:
+    needs: version
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: fork-release-icons
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
+      - run: cargo build --release --locked -p solidcraft-cli
+      - run: |
+          . packaging/env.sh
+          make_icons target/release/solidcraft-cli icons
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: icons
+          path: icons
+          if-no-files-found: error
+
+  linux:
+    name: Linux ${{ matrix.arch }}
+    needs: version
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-22.04, deb: amd64 }
+          - { arch: aarch64, runner: ubuntu-22.04-arm, deb: arm64 }
+    env:
+      SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
+      SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
+      NFPM_VERSION: 2.47.0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends desktop-file-utils appstream zsync rpm
+          curl -fsSL -o "$RUNNER_TEMP/nfpm.deb" \
+            "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_${{ matrix.deb }}.deb"
+          sudo dpkg -i "$RUNNER_TEMP/nfpm.deb"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: fork-release-linux-${{ matrix.arch }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
+      - name: Build and package (AppImage, deb, rpm, tar.gz)
+        run: packaging/linux/package.sh
+      - name: Check the packages
+        run: |
+          dpkg-deb --info dist/release/*.deb
+          rpm -qip dist/release/*.rpm
+          for appimage in dist/release/*.AppImage; do
+            chmod +x "$appimage"
+            APPIMAGE_EXTRACT_AND_RUN=1 "$appimage" --version
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: dist/release/*
+          if-no-files-found: error
+
+  macos-build:
+    name: macOS build ${{ matrix.arch }}
+    needs: version
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: aarch64, target: aarch64-apple-darwin }
+          - { arch: x86_64, target: x86_64-apple-darwin }
+    env:
+      SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
+      SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: fork-release-macos-${{ matrix.arch }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh ${{ matrix.target }}
+      - name: Build
+        run: packaging/macos/package.sh --build-only ${{ matrix.target }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-bin-${{ matrix.arch }}
+          path: |
+            target/${{ matrix.target }}/release/solidcraft
+            target/${{ matrix.target }}/release/solidcraft-cli
+            target/${{ matrix.target }}/release/solvecraft-cli
+          if-no-files-found: error
+
+  macos:
+    name: macOS universal
+    needs: [version, macos-build]
+    runs-on: macos-15
+    env:
+      SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
+      SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: macos-bin-aarch64
+          path: target/aarch64-apple-darwin/release
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: macos-bin-x86_64
+          path: target/x86_64-apple-darwin/release
+      - name: Join, package and check (dmg, CLI zip; ad-hoc signed, not notarized)
+        run: |
+          chmod +x target/*-apple-darwin/release/solidcraft target/*-apple-darwin/release/solidcraft-cli target/*-apple-darwin/release/solvecraft-cli
+          packaging/macos/package.sh --arch universal --skip-build
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-macos
+          path: dist/release/*
+          if-no-files-found: error
+
+  windows:
+    name: Windows x64
+    needs: [version, icons]
+    runs-on: windows-latest
+    env:
+      SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: icons
+          path: icons
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: fork-release-windows-x64
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh x86_64-pc-windows-msvc
+      - name: Install WiX
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.UI.wixext/5.0.2 WixToolset.Util.wixext/5.0.2
+      - name: Build and package (msi, portable zip; unsigned)
+        shell: pwsh
+        env:
+          SOLIDCRAFT_ICONS: ${{ github.workspace }}/icons
+        run: ./packaging/windows/package.ps1 -Arch x64
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-windows-x64
+          path: dist/release/*
+          if-no-files-found: error
+
+  release:
+    name: Publish the test release
+    needs: [version, linux, macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      NOTES: ${{ inputs.notes }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*
+          path: artifacts
+          merge-multiple: true
+      - name: Version-less copies (what the in-app update picks by name)
+        working-directory: artifacts
+        run: |
+          shopt -s nullglob
+          for f in "solidcraft-$VERSION-"*; do
+            case "$f" in
+              *.msi | *-portable.zip | *.dmg | *.AppImage | *.deb | *.rpm)
+                cp -- "$f" "solidcraft-${f#"solidcraft-$VERSION-"}" ;;
+            esac
+          done
+          for f in solidcraft-windows-x64.msi solidcraft-macos-universal.dmg \
+            solidcraft-linux-x86_64.AppImage solidcraft-linux-x86_64.deb solidcraft-linux-x86_64.rpm; do
+            test -s "$f" || { echo "::error::missing version-less copy $f"; exit 1; }
+          done
+      - name: Checksums and notes
+        run: |
+          (cd artifacts && sha256sum -- * | tee SHA256SUMS.txt)
+          {
+            echo "Test build of \`$GITHUB_REF_NAME\` at $GITHUB_SHA."
+            echo
+            if [ -n "$NOTES" ]; then printf '%s\n\n' "$NOTES"; fi
+            echo "**Download:** macOS \`solidcraft-macos-universal.dmg\` · Windows \`solidcraft-windows-x64.msi\` · Linux \`solidcraft-linux-x86_64.AppImage\` (or .deb / .rpm; aarch64 too)."
+            echo
+            echo "These builds are not signed. macOS: right-click SolidCraft > Open the first time (or System Settings > Privacy & Security > Open Anyway). Windows: More info > Run anyway."
+            echo
+            echo "Once installed, the app offers newer test builds itself. Found a problem? Use **Report a bug** in the title bar."
+          } >notes.md
+      - name: Publish
+        working-directory: artifacts
+        run: |
+          tag="v$VERSION"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::Release $tag already exists"
+            exit 1
+          fi
+          sha256sum --check SHA256SUMS.txt
+          # Staged as a draft first so a half-uploaded release is never "latest".
+          gh release create "$tag" --draft --title "SolidCraft v$VERSION" --target "$GITHUB_SHA" --notes-file ../notes.md -- *
+          gh release edit "$tag" --draft=false --prerelease=false --latest
+          echo "### Published $tag" >>"$GITHUB_STEP_SUMMARY"
