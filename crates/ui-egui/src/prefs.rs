@@ -763,6 +763,13 @@ preference_settings! {
     parts_library_folder: String = String::new();
     /// Converting a STEP or IGES part stands up a file exported with Y up (SolidWorks).
     parts_library_stand_up: bool = true;
+    /// The Browser panel has a Versions tab (docs/versions.md): check-in, history and restore for
+    /// the designs in a folder. Off: the panel is the Browser alone, as before.
+    versions_tab: bool = true, PAGE_DESIGN => check_id("prefs.versions_tab");
+    /// The folders that keep versions, as full paths.
+    versions_folders: Vec<String> = Vec::new();
+    /// The name check-ins are made under (empty: this computer's user name).
+    versions_author: String = String::new();
     /// AI features (docs/agent-chat.md): the master switch. Off: no AI button, shortcut, menu
     /// entry or panel, and nothing is looked for or started.
     ai_features: bool = true, PAGE_AI;

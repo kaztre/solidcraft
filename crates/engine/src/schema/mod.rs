@@ -60,6 +60,7 @@ pub mod features;
 pub mod inspect;
 pub mod parts_library;
 pub mod surface_analysis;
+pub mod versions;
 
 pub use check::{Contract, Issue, ParamCheck, TypedContract, input_schema_for, output_schema_for, run_checked, run_checked_as};
 pub use types::*;

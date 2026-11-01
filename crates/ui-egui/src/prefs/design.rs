@@ -78,6 +78,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::text(ui, app.tr("ui.hide_origin_note"), ui_kit::Text::Hint("hide_origin"));
         setting::linked_parts_auto_update(app, ui);
         ui_kit::text(ui, app.tr("prefs.linked_parts_auto_update_note"), ui_kit::Text::Hint("linked_parts_auto_update"));
+        setting::versions_tab(app, ui);
+        ui_kit::text(ui, app.tr("prefs.versions_tab_note"), ui_kit::Text::Hint("versions_tab"));
     });
     // The Hole command's own settings, under its name.
     ui_kit::settings_section(ui, "create_hole", crate::i18n::tr_label("Create Hole"), |ui| {

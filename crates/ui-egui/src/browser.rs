@@ -1077,6 +1077,11 @@ fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, c
     if crate::render_workspace::browser_mode(app, ui) {
         return;
     }
+    if app.preferences.versions_tab && app.versions.open {
+        t.secondary_hline(ui.painter(), ui.max_rect().x_range(), ui.cursor().top() + 1.0, t.toolbar.lerp_to_gamma(t.border, 0.5));
+        crate::versions::panel(app, ui);
+        return;
+    }
     t.secondary_hline(ui.painter(), ui.max_rect().x_range(), ui.cursor().top() + 1.0, t.toolbar.lerp_to_gamma(t.border, 0.5));
     ui.add_space(t.space_3);
     if collapsible && !stacked {
@@ -1105,12 +1110,26 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     let title = crate::i18n::tr("ui.browser_title").to_string();
     let kind = if collapsible { egui::WidgetType::Button } else { egui::WidgetType::Label };
     response.widget_info(|| egui::WidgetInfo::labeled(kind, true, &title));
+    let versions = app.preferences.versions_tab && !collapsed && app.versions.open;
+    let title = if versions { crate::i18n::tr("ui.versions_tab").to_string() } else { title };
     let galley = ui.painter().layout_no_wrap(title, crate::fonts::semibold(t.font_heading), t.text);
     ui.painter().galley(pos2(rect.left() + t.space_6, rect.center().y - galley.size().y / 2.0), galley, t.text);
     let mut right = rect.right() - t.space_6;
     if collapsible {
         crate::ui_kit::disclosure(ui.painter(), pos2(right - t.form_section_icon_size / 2.0, rect.center().y), !collapsed, t.text_dim);
         right -= 18.0;
+    }
+    if app.preferences.versions_tab && !collapsed {
+        right = crate::versions::header_switch(app, ui, rect, right);
+    }
+    if versions {
+        if collapsible {
+            let tip = crate::i18n::tr(if collapsed { "ui.browser_expand" } else { "ui.browser_collapse" });
+            if response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(tip).clicked() {
+                fold(app, stacked, vertical);
+            }
+        }
+        return;
     }
     let bodies = app.session.model.state().bodies.len();
     let key = if bodies == 1 { "ui.browser_bodies_one" } else { "ui.browser_bodies_other" };
@@ -1120,14 +1139,19 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     if collapsible {
         let tip = crate::i18n::tr(if collapsed { "ui.browser_expand" } else { "ui.browser_collapse" });
         if response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(tip).clicked() {
-            if stacked {
-                app.preferences.timeline_left_browser_collapsed = !app.preferences.timeline_left_browser_collapsed;
-            } else if vertical {
-                app.preferences.timeline_left_browser_collapsed = true;
-            } else {
-                app.tree.panel_collapsed = !app.tree.panel_collapsed;
-            }
+            fold(app, stacked, vertical);
         }
+    }
+}
+
+/// The header's click: fold or unfold the card.
+fn fold(app: &mut SolveApp, stacked: bool, vertical: bool) {
+    if stacked {
+        app.preferences.timeline_left_browser_collapsed = !app.preferences.timeline_left_browser_collapsed;
+    } else if vertical {
+        app.preferences.timeline_left_browser_collapsed = true;
+    } else {
+        app.tree.panel_collapsed = !app.tree.panel_collapsed;
     }
 }
 

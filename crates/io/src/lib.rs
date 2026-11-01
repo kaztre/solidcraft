@@ -29,6 +29,7 @@ mod sketch2d;
 mod svg;
 mod threemf;
 pub mod urdf;
+pub mod versions;
 pub mod vfs;
 
 pub use dxf::{read_dxf, write_dxf};
