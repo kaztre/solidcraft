@@ -6,7 +6,7 @@ description that tell the agent when to load it, and an optional supporting refe
 
 The modelling documents are built into SolidCraft: its MCP server's `skill_reference` tool returns them, so an
 agent without file access (such as the one in SolidCraft's own chat) can still read a skill's reference.
-The contributor skills (everything except modeling, editing, checking and mechanisms) are for repository work and are not embedded in that tool. `AGENTS.md` routes to them; `cargo xtask skills` fails when its table and this folder disagree or a file, `cargo xtask` command or skill they name is gone.
+The contributor skills (everything except modeling, editing, checking, mechanisms and parts-and-versions) are for repository work and are not embedded in that tool. `AGENTS.md` routes to them; `cargo xtask skills` fails when its table and this folder disagree or a file, `cargo xtask` command or skill they name is gone.
 
 | Skill | Loads when the agent |
 |---|---|
@@ -26,6 +26,7 @@ The contributor skills (everything except modeling, editing, checking and mechan
 | [`solidcraft-editing`](solidcraft-editing/SKILL.md) | changes, fixes or extends an existing design |
 | [`solidcraft-checking`](solidcraft-checking/SKILL.md) | builds, changes or ports a design, next to the two above: parameter ranges, every allowed value, exact STEP comparison, regression tests, designs kept in git |
 | [`solidcraft-mechanisms`](solidcraft-mechanisms/SKILL.md) | builds, drives or animates an assembly: components, joints, motion links, closed loops such as actuators, contact sets, motion studies |
+| [`solidcraft-parts`](solidcraft-parts/SKILL.md) | is asked how to set up a parts library, insert and update linked parts, or check in, release, see the history of or go back to a version of a part: teaches the buttons step by step, or does it with the `versions.*` and `library.parts.*` commands |
 | [`solidcraft-reporting`](solidcraft-reporting/SKILL.md) | hears that something went wrong (a crash, a failed command, a wrong shape or number, a hang): reproduces it in a fresh design, shrinks it to a minimal script and writes the bug report |
 
 The modelling skills teach the agent to:

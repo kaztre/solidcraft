@@ -47,6 +47,9 @@ Parametric: a size or position that must follow a parameter is an expression in 
 dimension to `\"origin\"` or an edge, or a pattern spacing; a plain number never follows a parameter. Every sketch must end at \
 dof 0 (`sketch.solve` reports it). A pick (`edges: [[x,y,z]]`, `faces: [[x,y,z]]`) is a number that snaps to the nearest edge \
 or face and follows it when parameters change.\n\n\
+Parts libraries and versions: when someone asks how to use a parts library or keep versions of their parts (check in, \
+history, revisions, going back), read `skill_reference` for solidcraft-parts and teach them the buttons one step \
+at a time.\n\n\
 Verify: `measure {}` after each stage and compare volume and bbox with your numbers; `ok: true` alone proves nothing: a cut \
 that leaves the volume unchanged has missed, a join that adds a body did not touch. Positions of holes and bosses come from \
 `body_topology` (cylinder origin, axis and radius), not from the volume or the centre of mass of a symmetric part. To check \

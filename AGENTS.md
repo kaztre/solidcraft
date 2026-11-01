@@ -1,6 +1,6 @@
 # SolidCraft: instructions for agents
 
-SolidCraft is a clean-room, pure-Rust parametric 3D CAD app (sketch solver, feature timeline, B-rep kernel, an egui UI that agents drive). This file is a router: the hard rules, then the skill to read for your task. Humans: CONTRIBUTING.md.
+SolidCraft is a clean-room, pure-Rust parametric 3D CAD app (sketch solver, timeline, B-rep kernel, an egui UI agents drive). This file is a router: hard rules, then the skill for your task. Humans: CONTRIBUTING.md.
 
 ## Start here
 Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelled `help wanted`, `good first issue`, `needs-triage`; architecture in `docs/architecture.md`. Act when the code, docs and rules settle a question; ask only when it changes what users see. Local `plan/` notes are optional.
@@ -10,7 +10,7 @@ Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelle
 - No GPL/LGPL/AGPL code, not even reading it (OpenCASCADE, FreeCAD, SolveSpace, CadQuery, LibreCAD, QCAD): `cargo xtask licences --check`.
 - Every asset is original or openly licensed with a row in ATTRIBUTION.md; read `assets/AGENTS.md` before icon work: `cargo xtask assets`, `cargo xtask icons`.
 - Never crash: no unwrap/expect/panic/unsafe in non-test code (unsafe allowlist in crash-safety), errors are `Result`, input is hostile: clippy `-D warnings`, `hostile_params_never_panic`.
-- Model decisions (what an operation does, which bodies it touches, which face or edge a point or name means, depths, nearness) use exact geometry; a mesh is for display, export, previews and mesh bodies (`xtask/mesh-decisions.txt` only shrinks): `cargo xtask mesh-decisions`.
+- Model decisions (what an operation does or touches, which face or edge a point or name means, depths, nearness) use exact geometry; a mesh is for display, export, previews and mesh bodies (`xtask/mesh-decisions.txt` only shrinks): `cargo xtask mesh-decisions`.
 - New kernel cases go to solidcore: `cargo xtask lists`.
 - Everything is a command and programmatic calls never open dialogs: `skills/solidcraft-commands/SKILL.md`.
 - Layering (geom, sketch/kernel/render, doc, io, engine, ui-egui, apps); only `crates/kernel` uses truck: `cargo xtask layers`.
@@ -32,19 +32,20 @@ Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelle
 | Working on | Read |
 |---|---|
 | A PR, a claim, review, CI or evidence | `skills/solidcraft-contributing/SKILL.md` |
-| Licences, assets, clean-room, the name | `skills/solidcraft-ground-rules/SKILL.md` |
+| Licences, assets, clean room, name | `skills/solidcraft-ground-rules/SKILL.md` |
 | Non-test Rust, hostile input, a crash report | `skills/solidcraft-crash-safety/SKILL.md` |
 | A command, a crate boundary | `skills/solidcraft-commands/SKILL.md` |
 | A dialog, panel, camera, icon, colour | `skills/solidcraft-ui/SKILL.md` |
 | Labels, messages, translations | `skills/solidcraft-ui-text/SKILL.md` |
-| Saving something new in a design, import, export | `skills/solidcraft-file-formats/SKILL.md` |
+| Saving new design data, import, export | `skills/solidcraft-file-formats/SKILL.md` |
 | Preferences, a changed default | `skills/solidcraft-preferences/SKILL.md` |
 | Writing or running tests | `skills/solidcraft-tests/SKILL.md` |
-| Slow work, the window thread, wasm | `skills/solidcraft-performance/SKILL.md` |
+| Slow work, window thread, wasm | `skills/solidcraft-performance/SKILL.md` |
 | Releases, installers, packages | `skills/solidcraft-packaging/SKILL.md` |
-| Running the app, control channel, MCP tools | `skills/solidcraft-agent-tools/SKILL.md` |
+| Running the app, control channel, MCP | `skills/solidcraft-agent-tools/SKILL.md` |
 | Building a part over MCP | `skills/solidcraft-modeling/SKILL.md` |
 | Changing an existing design | `skills/solidcraft-editing/SKILL.md` |
-| A bug report, a crash, a wrong result | `skills/solidcraft-reporting/SKILL.md` |
+| A bug report, crash or wrong result | `skills/solidcraft-reporting/SKILL.md` |
 | Checking, porting, designs in git | `skills/solidcraft-checking/SKILL.md` |
 | Assemblies, joints, motion | `skills/solidcraft-mechanisms/SKILL.md` |
+| Parts libraries, versions | `skills/solidcraft-parts/SKILL.md` |
