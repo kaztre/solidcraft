@@ -839,7 +839,19 @@ impl Session {
 
     /// Mutable document (copy-on-write).
     pub fn doc_mut(&mut self) -> &mut Document {
+        #[cfg(test)]
+        if Arc::strong_count(&self.doc) > 1 {
+            tests::doc_copies::record();
+        }
         Arc::make_mut(&mut self.doc)
+    }
+
+    /// Make `doc` the design, as `*doc_mut() = doc` does, without first copying a shared
+    /// document only to overwrite the copy: a command's undo step still holds the design it
+    /// started from, so `doc_mut` would copy all of it (every feature and sketch) on each
+    /// sketch drag frame (#10507).
+    pub(crate) fn set_doc(&mut self, doc: Document) {
+        self.doc = Arc::new(doc);
     }
 
     /// Prepared placements only: optional save caches must not compute a cold world.

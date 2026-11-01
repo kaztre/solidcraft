@@ -337,7 +337,7 @@ pub(super) fn edit_solved<T>(
     };
     sk.validate_periodic_splines()?;
     *doc.sketch_mut(id)? = sk;
-    *s.doc_mut() = doc;
+    s.set_doc(doc);
     Ok((out, rep))
 }
 
