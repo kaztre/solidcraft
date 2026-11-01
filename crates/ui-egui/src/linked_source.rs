@@ -202,6 +202,11 @@ pub(crate) fn update_changed(app: &mut SolveApp) {
             app.docs.link_stamps.push((c, s));
         }
     }
+    // A part in a Parts Library folder stays pinned until the user presses Update on the notice
+    // the linked-parts watch shows for it (`linked_watch`), so a vendor's new revision never
+    // changes a design unasked.
+    let library = crate::linked_watch::library_components(app);
+    let changed: Vec<u64> = changed.into_iter().filter(|c| !library.contains(c)).collect();
     // No room to wait: they are still changed when the tab next comes back.
     if changed.is_empty() || app.file_load.room() == 0 {
         return;

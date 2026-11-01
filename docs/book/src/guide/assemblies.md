@@ -427,7 +427,9 @@ changed since it last read them, whether the part was saved in another tab, anot
 a checkout. The parts it reads come in as one step, so one **Undo** takes them all back. A part
 that cannot be read keeps its bodies, is tried again the next time, and holds up no other.
 **Update changed linked designs when a tab comes back** (Preferences, Design,
-`update_changed_links`) turns this off.
+`update_changed_links`) turns this off. While the assembly is open, a changed project part also
+comes in by itself, and a changed part in a Parts Library folder stays as it is and offers
+**Update** instead (see "Changed parts" in docs/parts-library.md).
 To edit the source, right-click a linked component or occurrence in the Browser and choose
 **Open Linked Design**. It opens the part in another tab and reports if its file is missing.
 **Break Link** (`component.break_link`) keeps the bodies and forgets the file, and

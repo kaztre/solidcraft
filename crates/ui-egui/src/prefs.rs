@@ -1367,6 +1367,9 @@ preference_settings! {
     /// How the offer is made for a file whose header names no program known to save Y up: a note
     /// over the view (the default), the dialog, or nothing (#7717).
     stand_up_unknown: StandUpUnknown = StandUpUnknown::default(), PAGE_DESIGN;
+    /// A linked project part whose file changed comes into the open design by itself
+    /// (`linked_watch`); off, every changed part waits for Update, as Update Links did before.
+    linked_parts_auto_update: bool = true, PAGE_DESIGN => check_id("prefs.linked_parts_auto_update");
     /// Extrude: with a profile picked, a face, vertex or parallel plane picked off its plane
     /// switches the extent to To Object (off: picks only add profiles, as before). A click into the
     /// Profiles box makes the next picks profiles again.

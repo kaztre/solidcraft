@@ -1,0 +1,65 @@
+{
+  "en": {
+    "prefs.linked_parts_auto_update": "Update changed linked parts automatically",
+    "prefs.linked_parts_auto_update_note": "When a linked part's file changes, its new shape comes into the open design at once, as one step Undo takes back. Parts from a Parts Library folder wait for you to press Update. Off: every changed part waits.",
+    "ui.linked_available": "These parts changed since they were brought into this design:",
+    "ui.linked_available_title": "Update available",
+    "ui.linked_not_now": "Not Now",
+    "ui.linked_update": "Update",
+    "ui.linked_updating": "Updating {names}: the part files changed. Undo brings back the old shapes."
+  },
+  "de": {
+    "prefs.linked_parts_auto_update": "Geänderte verknüpfte Teile automatisch aktualisieren",
+    "prefs.linked_parts_auto_update_note": "Ändert sich die Datei eines verknüpften Teils, kommt seine neue Form sofort in die offene Konstruktion, als ein Schritt, den Rückgängig zurücknimmt. Teile aus einem Teilebibliothek-Ordner warten, bis Sie auf Aktualisieren drücken. Aus: Alle geänderten Teile warten.",
+    "ui.linked_available": "Diese Teile haben sich geändert, seit sie in diese Konstruktion gebracht wurden:",
+    "ui.linked_available_title": "Aktualisierung verfügbar",
+    "ui.linked_not_now": "Nicht jetzt",
+    "ui.linked_update": "Aktualisieren",
+    "ui.linked_updating": "{names} wird aktualisiert: Die Teiledateien haben sich geändert. Rückgängig bringt die alten Formen zurück."
+  },
+  "ja": {
+    "prefs.linked_parts_auto_update": "変更されたリンク部品を自動で更新",
+    "prefs.linked_parts_auto_update_note": "リンク部品のファイルが変わると、新しい形状がすぐに開いているデザインに反映されます（元に戻すで戻せる 1 ステップ）。部品ライブラリのフォルダーの部品は「更新」を押すまで待ちます。オフ：変更されたすべての部品が待ちます。",
+    "ui.linked_available": "次の部品は、このデザインに取り込んだ後に変更されています:",
+    "ui.linked_available_title": "更新があります",
+    "ui.linked_not_now": "今はしない",
+    "ui.linked_update": "更新",
+    "ui.linked_updating": "{names} を更新しています：部品ファイルが変更されました。元に戻すで以前の形状に戻せます。"
+  },
+  "zh": {
+    "prefs.linked_parts_auto_update": "自动更新已更改的链接零件",
+    "prefs.linked_parts_auto_update_note": "链接零件的文件更改后，其新形状会立即进入打开的设计，作为可撤销的一步。零件库文件夹中的零件会等待您按“更新”。关闭：所有更改的零件都会等待。",
+    "ui.linked_available": "这些零件在放入此设计后已更改：",
+    "ui.linked_available_title": "有可用更新",
+    "ui.linked_not_now": "暂不",
+    "ui.linked_update": "更新",
+    "ui.linked_updating": "正在更新 {names}：零件文件已更改。撤销可恢复旧形状。"
+  },
+  "ko": {
+    "prefs.linked_parts_auto_update": "변경된 링크 부품 자동 업데이트",
+    "prefs.linked_parts_auto_update_note": "링크 부품의 파일이 바뀌면 새 형상이 열린 디자인에 바로 반영됩니다(실행 취소로 되돌릴 수 있는 한 단계). 부품 라이브러리 폴더의 부품은 업데이트를 누를 때까지 기다립니다. 끄면 변경된 모든 부품이 기다립니다.",
+    "ui.linked_available": "이 디자인에 가져온 뒤 변경된 부품:",
+    "ui.linked_available_title": "업데이트 가능",
+    "ui.linked_not_now": "나중에",
+    "ui.linked_update": "업데이트",
+    "ui.linked_updating": "{names} 업데이트 중: 부품 파일이 변경되었습니다. 실행 취소로 이전 형상을 되돌릴 수 있습니다."
+  },
+  "ar": {
+    "prefs.linked_parts_auto_update": "تحديث القطع المرتبطة المتغيرة تلقائيًا",
+    "prefs.linked_parts_auto_update_note": "عندما يتغير ملف قطعة مرتبطة، يدخل شكلها الجديد التصميم المفتوح فورًا، كخطوة واحدة يتراجع عنها التراجع. تنتظر قطع مجلد مكتبة القطع حتى تضغط تحديث. عند الإيقاف: تنتظر كل القطع المتغيرة.",
+    "ui.linked_available": "تغيّرت هذه القطع منذ أُدخلت في هذا التصميم:",
+    "ui.linked_available_title": "يتوفر تحديث",
+    "ui.linked_not_now": "ليس الآن",
+    "ui.linked_update": "تحديث",
+    "ui.linked_updating": "جارٍ تحديث {names}: تغيّرت ملفات القطع. يعيد التراجع الأشكال القديمة."
+  },
+  "he": {
+    "prefs.linked_parts_auto_update": "עדכון אוטומטי של חלקים מקושרים שהשתנו",
+    "prefs.linked_parts_auto_update_note": "כשקובץ של חלק מקושר משתנה, הצורה החדשה שלו נכנסת מיד לתכנון הפתוח, כצעד אחד שביטול מחזיר. חלקים מתיקיית ספריית חלקים ממתינים עד שתלחץ עדכון. כבוי: כל החלקים שהשתנו ממתינים.",
+    "ui.linked_available": "החלקים האלה השתנו מאז שהוכנסו לתכנון הזה:",
+    "ui.linked_available_title": "יש עדכון",
+    "ui.linked_not_now": "לא עכשיו",
+    "ui.linked_update": "עדכון",
+    "ui.linked_updating": "מעדכן את {names}: קובצי החלקים השתנו. ביטול מחזיר את הצורות הקודמות."
+  }
+}

@@ -62,6 +62,23 @@ Change the properties later with File ▸ Design Properties… in the part. If t
 saved in the library (a folder you can't write to), a copy of the STEP is inserted instead, and
 the window says why.
 
+## Changed parts
+
+A linked part remembers the file it was read from. While a design with linked parts is open,
+SolidCraft looks at their files every couple of seconds, and again when you bring another design
+to the front:
+
+- A **project part** whose file changed (you saved it in another tab, or a teammate's copy
+  arrived) comes into the design by itself, as one step that **Undo** takes back. The status
+  line says which parts were updated. It waits while a dialog, a sketch or a tool is open.
+- A **library part** (one inside a Parts Library folder) stays as it is: an **Update available**
+  notice lists it, and **Update** brings in the new revision. **Not Now** leaves it until its file
+  changes again. A vendor's new revision never changes a design without you asking.
+
+Preferences ▸ Design ▸ **Update changed linked parts automatically** turns the first off: then
+every changed part waits for **Update**, and **Update Links** still reads them all again. A link
+made before SolidCraft remembered its file is checked once it has been updated.
+
 ## Converting a whole category
 
 Pick a library or a folder in the tree and press **Convert N to SolidCraft Parts…**: it saves every
