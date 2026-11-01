@@ -99,6 +99,7 @@ pub mod joint_drag;
 pub mod keymap;
 mod length_input;
 mod linked_source;
+pub mod linked_watch;
 #[cfg(test)]
 mod loft_rails_dialog_tests;
 #[cfg(test)]
@@ -465,6 +466,8 @@ pub struct SolveApp {
     pub parts_library: Option<parts_library::PartsLibrary>,
     /// The threads the Parts Library started, which outlive the window.
     parts_workers: std::sync::Arc<parts_library::Workers>,
+    /// The watch over the front design's linked parts (`linked_watch`).
+    pub link_watch: linked_watch::Watch,
     material_card_review: Option<material_card_review::ReviewWindow>,
     /// Context menus, rename box and Properties window.
     pub menu: context_menu::MenuState,
@@ -682,6 +685,7 @@ impl SolveApp {
             bom: None,
             parts_library: None,
             parts_workers: Default::default(),
+            link_watch: Default::default(),
             material_card_review: None,
             menu: context_menu::MenuState::default(),
             gesture: mouse_gesture::State::default(),
@@ -2011,6 +2015,7 @@ impl SolveApp {
         render_workspace::sync_backend(self);
         render_workspace::tick(self, ctx);
         file_load::tick(self, ctx);
+        linked_watch::tick(self, ctx);
         save_job::tick(self, false);
         if self.saving.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
@@ -2295,6 +2300,7 @@ impl SolveApp {
         design_properties::show(self, ui.ctx());
         bom_panel::show(self, ui.ctx());
         parts_library::show(self, ui.ctx());
+        linked_watch::show(self, ui.ctx());
         material_card_review::show(self, ui.ctx());
         recovery_ui::show(self, ui.ctx());
         stand_up::show(self, ui.ctx());

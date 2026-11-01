@@ -698,6 +698,9 @@ preference_settings! {
     up_axis: String = "z".into(), PAGE_DESIGN;
     /// After a STEP or IGES file opens, offer to stand a Y-up part up (`stand_up`).
     offer_stand_up: bool = true, PAGE_DESIGN => check("Offer to stand up Y-up files", "After a STEP or IGES file opens with Z up, offer a quarter turn about X");
+    /// A linked project part whose file changed comes into the open design by itself
+    /// (`linked_watch`); off, every changed part waits for Update, as Update Links did before.
+    linked_parts_auto_update: bool = true, PAGE_DESIGN => check_id("prefs.linked_parts_auto_update");
     /// Extrude: with a profile picked, a face, vertex or parallel plane picked off its plane
     /// switches the extent to To Object (off: picks only add profiles, as before).
     extrude_auto_to_object: bool = false, PAGE_DESIGN => check("Extrude to a picked target", "In Extrude, with a profile picked, picking a face, vertex or parallel plane off its plane switches the extent to To Object");

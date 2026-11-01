@@ -65,6 +65,12 @@ pub fn is_design_path(path: &str) -> bool {
 /// Largest design file we read.
 pub const MAX_DESIGN_BYTES: usize = 256 << 20;
 
+/// The SHA-256 of `bytes` in lower-case hex: what a linked design's `source` records.
+pub fn content_digest(bytes: &[u8]) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum IoError {
     #[error("unsupported format `{0}` (use stl, obj, step, 3mf, urdf or solidcraft)")]

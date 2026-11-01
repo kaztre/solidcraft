@@ -354,7 +354,9 @@ its own document. A STEP or mesh file picked there is inserted as **Insert STEP*
 Mesh** would. The part's solid bodies come
 in as they sit in that design, and they are kept in the assembly, so it opens even without the
 part file. The link is stored relative to the assembly's folder once the assembly is saved.
-After the part file changes, **Update Links** (`component.update_links`) reads it again.
+After the part file changes, **Update Links** (`component.update_links`) reads it again. A
+changed project part comes in by itself and a changed library part offers **Update** (see
+"Changed parts" in docs/parts-library.md).
 To edit the source, right-click a linked component or occurrence in the Browser and choose
 **Open Linked Design**. It opens the part in another tab and reports if its file is missing.
 **Break Link** (`component.break_link`) keeps the bodies and forgets the file, and

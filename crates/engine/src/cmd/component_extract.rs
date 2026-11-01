@@ -592,7 +592,10 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
         f.link_faces = faces;
     }
     let path = stored(s.path.as_deref(), &file);
-    s.doc_mut().links.insert(comp, DesignLink { path: file.to_string_lossy().into_owned(), feature: id });
+    let source = solidcraft_io::vfs::read_design_path(&file.to_string_lossy(), s.path.as_deref(), solidcraft_io::MAX_DESIGN_BYTES)
+        .ok()
+        .map(|b| solidcraft_io::content_digest(&b));
+    s.doc_mut().links.insert(comp, DesignLink { path: file.to_string_lossy().into_owned(), feature: id, source });
     s.refresh();
     rename_joint_faces(s, &state, id, &sc.own);
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {

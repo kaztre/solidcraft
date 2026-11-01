@@ -83,7 +83,7 @@ impl Request {
             Kind::Insert => (insert_command(&self.path), self.params()),
             Kind::Recover { id, dir } => ("doc.recover", json!({"id": id, "dir": dir})),
             Kind::ExportDxf => ("file.export_view_dxf", Value::Object(self.options.clone())),
-            Kind::UpdateLinks => ("component.update_links", json!({})),
+            Kind::UpdateLinks => ("component.update_links", Value::Object(self.options.clone())),
         }
     }
     fn answer(&self, r: Result<Value, String>) {
