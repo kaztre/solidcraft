@@ -606,6 +606,135 @@ fn a_round_all_round_a_part_without_a_seam_imports() {
     assert!(rel(area, want) < 1e-6, "area {area} vs {want}");
 }
 
+/// A grip's sleeve as NX writes it: one face on a rational B-spline tube closed round its angle
+/// in v (not u), bounded by its two rims alone and holed by a rib's footprint lying across the
+/// angle the spline starts at. It comes in as that one face, the band's area less the hole's
+/// (r pi a b, the footprint an ellipse of a radians by b in angle and height). It was refused (a
+/// loop "winding around a surface ... in v"); turned to close round u, its seam along the
+/// spline's start cut through the footprint (an edge 1 mm off the face).
+#[test]
+fn a_band_on_a_spline_closed_in_v_with_a_hole_across_its_start_imports() {
+    use std::f64::consts::{PI, TAU};
+    let (r, h, a, b) = (5.0, 4.0, 0.3, 1.0);
+    let mut t = String::from(HEAD);
+    let (net0, row0) = circle_net(100, 0.0, r, 0.0);
+    let (net1, row1) = circle_net(110, 0.0, r, h);
+    t += &net0;
+    t += &net1;
+    t += &format!(
+        "#1=(BOUNDED_SURFACE()B_SPLINE_SURFACE(1,2,(({}),({})),.UNSPECIFIED.,.F.,.T.,.F.)B_SPLINE_SURFACE_WITH_KNOTS((2,2),(3,2,2,2,3),(0.,1.),(0.,1.,2.,3.,4.),.UNSPECIFIED.)GEOMETRIC_REPRESENTATION_ITEM()RATIONAL_B_SPLINE_SURFACE((({CIRCLE_WEIGHTS}),({CIRCLE_WEIGHTS})))REPRESENTATION_ITEM('')SURFACE());\n",
+        row0.join(","),
+        row1.join(",")
+    );
+    // The rims, each a circle about z from angle 0, and the footprint round angle 0 halfway up.
+    t += &format!(
+        "#2=CARTESIAN_POINT('',(0.,0.,0.));\n#3=CARTESIAN_POINT('',(0.,0.,{h:?}));\n#4=DIRECTION('',(0.,0.,1.));\n#5=DIRECTION('',(0.,0.,-1.));\n#6=DIRECTION('',(1.,0.,0.));\n"
+    );
+    t += "#7=AXIS2_PLACEMENT_3D('',#2,#4,#6);\n#8=AXIS2_PLACEMENT_3D('',#3,#5,#6);\n";
+    t += &format!("#9=CIRCLE('',#7,{r:?});\n#10=CIRCLE('',#8,{r:?});\n");
+    t += &format!(
+        "#11=CARTESIAN_POINT('',({r:?},0.,0.));\n#12=CARTESIAN_POINT('',({r:?},0.,{h:?}));\n#13=VERTEX_POINT('',#11);\n#14=VERTEX_POINT('',#12);\n"
+    );
+    let n = 64;
+    let params: Vec<f64> = (0..=n).map(|k| TAU * k as f64 / n as f64).collect();
+    let footprint: Vec<[f64; 3]> =
+        params.iter().map(|s| (a * s.cos(), h / 2.0 + b * s.sin())).map(|(th, z)| [r * th.cos(), r * th.sin(), z]).collect();
+    let (hole, _) = spline_curve(1000, &params, &footprint);
+    t += &hole;
+    let p = footprint[0];
+    t += &format!("#15=CARTESIAN_POINT('',({:.16},{:.16},{:.16}));\n#16=VERTEX_POINT('',#15);\n", p[0], p[1], p[2]);
+    t += "#20=EDGE_CURVE('',#13,#13,#9,.T.);\n#21=EDGE_CURVE('',#14,#14,#10,.T.);\n#22=EDGE_CURVE('',#16,#16,#1000,.T.);\n";
+    // The surface's normal points in (z along u, the angle along v); the face takes it, its rims
+    // running against their circles and the footprint round with its curve.
+    t += "#23=ORIENTED_EDGE('',*,*,#20,.F.);\n#24=ORIENTED_EDGE('',*,*,#21,.F.);\n#25=ORIENTED_EDGE('',*,*,#22,.T.);\n";
+    t += "#26=EDGE_LOOP('',(#23));\n#27=EDGE_LOOP('',(#24));\n#28=EDGE_LOOP('',(#25));\n";
+    t += "#29=FACE_BOUND('',#26,.T.);\n#30=FACE_BOUND('',#27,.T.);\n#31=FACE_BOUND('',#28,.T.);\n#32=ADVANCED_FACE('',(#29,#30,#31),#1,.T.);\n";
+    t += "#33=OPEN_SHELL('',(#32));\n#34=SHELL_BASED_SURFACE_MODEL('Sleeve',(#33));\n";
+    t += &context(50, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += "#60=MANIFOLD_SURFACE_SHAPE_REPRESENTATION('',(#34),#50);\n";
+    t += TAIL;
+    let imp = step_import(&t).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let body = &imp.bodies[0];
+    assert!(body.refused.is_none() && !body.body.is_mesh() && body.body.face_count() == 1, "{:?} {:?}", body.refused, imp.warnings);
+    let want = TAU * r * h - r * PI * a * b;
+    let area = measure(&body.body).unwrap().area;
+    assert!(rel(area, want) < 1e-4, "area {area} vs {want}");
+}
+
+/// A sliver round a part narrower than the file's tolerance (a 0.005 mm band of a torus by its
+/// outer equator, in a file of 0.02 mm), bounded by its two circles alone, takes a seam that
+/// short and comes in with its area, 2 pi r (R d + r sin d) for d its angle on the tube. Its
+/// seam was refused as "of no length", and the whole solid came in as surfaces.
+#[test]
+fn a_band_round_a_torus_narrower_than_the_tolerance_imports() {
+    use std::f64::consts::TAU;
+    let (major, minor, d) = (10.0, 1.0, 0.005_f64);
+    let (z, rim) = (minor * d.sin(), major + minor * d.cos());
+    let mut t = String::from(HEAD);
+    t += "#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n";
+    t += &format!("#5=TOROIDAL_SURFACE('',#4,{major:.1},{minor:.1});\n");
+    t += &format!(
+        "#6=CIRCLE('',#4,{:.1});\n#7=CARTESIAN_POINT('',(0.,0.,{z:.16}));\n#8=AXIS2_PLACEMENT_3D('',#7,#2,#3);\n#9=CIRCLE('',#8,{rim:.16});\n",
+        major + minor
+    );
+    t += &format!(
+        "#10=CARTESIAN_POINT('',({:.1},0.,0.));\n#11=VERTEX_POINT('',#10);\n#12=CARTESIAN_POINT('',({rim:.16},0.,{z:.16}));\n#13=VERTEX_POINT('',#12);\n",
+        major + minor
+    );
+    t += "#14=EDGE_CURVE('',#11,#11,#6,.T.);\n#15=EDGE_CURVE('',#13,#13,#9,.T.);\n";
+    t += "#16=ORIENTED_EDGE('',*,*,#14,.T.);\n#17=ORIENTED_EDGE('',*,*,#15,.F.);\n#18=EDGE_LOOP('',(#16));\n#19=EDGE_LOOP('',(#17));\n";
+    t += "#20=FACE_OUTER_BOUND('',#18,.T.);\n#21=FACE_BOUND('',#19,.T.);\n#22=ADVANCED_FACE('',(#20,#21),#5,.T.);\n";
+    t += "#23=OPEN_SHELL('',(#22));\n#24=SHELL_BASED_SURFACE_MODEL('Sliver',(#23));\n";
+    t += &context(50, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))").replace("LENGTH_MEASURE(1.E-6)", "LENGTH_MEASURE(0.02)");
+    t += "#60=MANIFOLD_SURFACE_SHAPE_REPRESENTATION('',(#24),#50);\n";
+    t += TAIL;
+    let imp = step_import(&t).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let b = &imp.bodies[0];
+    assert!(b.refused.is_none() && !b.body.is_mesh() && b.body.face_count() == 1, "{:?} {:?}", b.refused, imp.warnings);
+    let want = TAU * minor * (major * d + minor * d.sin());
+    let area = measure(&b.body).unwrap().area;
+    assert!(rel(area, want) < 1e-5, "area {area} vs {want}");
+}
+
+/// A band round a cylinder between its bottom rim (a vertex at angle 0) and a top rim of two
+/// arcs (vertices a quarter and three quarters round) written 0.02 mm off the cylinder, in a
+/// file of 1e-6 mm (a thread's start as SolidWorks writes its helices on a chamfer): its seam
+/// runs from the bottom vertex to the top rim, split at angle 0, and comes in with it, about
+/// 2 pi r h. The seam's middle lay half the top rim's gap off the surface, past the file's
+/// tolerance, and was refused ("a seam off its surface"); it may lie as far off as its ends.
+#[test]
+fn a_band_whose_rim_lies_off_its_cylinder_takes_a_seam_as_far_off() {
+    use std::f64::consts::TAU;
+    let (r, h, gap) = (5.0, 2.0, 0.02);
+    let top = r + gap;
+    let mut t = String::from(HEAD);
+    t += "#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n";
+    t += &format!("#5=CYLINDRICAL_SURFACE('',#4,{r:?});\n#6=CIRCLE('',#4,{r:?});\n");
+    t += &format!("#7=CARTESIAN_POINT('',(0.,0.,{h:?}));\n#8=AXIS2_PLACEMENT_3D('',#7,#2,#3);\n#9=CIRCLE('',#8,{top:?});\n");
+    t += &format!("#10=CARTESIAN_POINT('',({r:?},0.,0.));\n#11=VERTEX_POINT('',#10);\n");
+    t += &format!(
+        "#12=CARTESIAN_POINT('',(0.,{top:?},{h:?}));\n#13=VERTEX_POINT('',#12);\n#14=CARTESIAN_POINT('',(0.,{:?},{h:?}));\n#15=VERTEX_POINT('',#14);\n",
+        -top
+    );
+    t += "#16=EDGE_CURVE('',#11,#11,#6,.T.);\n#17=EDGE_CURVE('',#13,#15,#9,.T.);\n#18=EDGE_CURVE('',#15,#13,#9,.T.);\n";
+    // Above the bottom rim running round, below the top rim running back.
+    t += "#19=ORIENTED_EDGE('',*,*,#16,.T.);\n#20=ORIENTED_EDGE('',*,*,#18,.F.);\n#21=ORIENTED_EDGE('',*,*,#17,.F.);\n";
+    t += "#22=EDGE_LOOP('',(#19));\n#23=EDGE_LOOP('',(#20,#21));\n#24=FACE_OUTER_BOUND('',#22,.T.);\n#25=FACE_BOUND('',#23,.T.);\n";
+    t += "#26=ADVANCED_FACE('',(#24,#25),#5,.T.);\n#27=OPEN_SHELL('',(#26));\n#28=SHELL_BASED_SURFACE_MODEL('Band',(#27));\n";
+    t += &context(50, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += "#60=MANIFOLD_SURFACE_SHAPE_REPRESENTATION('',(#28),#50);\n";
+    t += TAIL;
+    let imp = step_import(&t).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let b = &imp.bodies[0];
+    assert!(b.refused.is_none() && !b.body.is_mesh() && b.body.face_count() == 1, "{:?} {:?}", b.refused, imp.warnings);
+    let want = TAU * r * h;
+    let area = measure(&b.body).unwrap().area;
+    assert!(rel(area, want) < 1e-3, "area {area} vs {want}");
+}
+
 #[test]
 fn several_bodies_and_names() {
     let a = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();

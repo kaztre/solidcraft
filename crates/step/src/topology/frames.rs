@@ -240,6 +240,26 @@ impl Builder<'_, '_> {
                 |all: bool| members.iter().filter(move |(fi, _, _)| all || spilling(fi)).filter_map(|(_, sign, e)| e.map(|e| sign * e[0][0]));
             let ends = members.iter().filter_map(|(_, sign, e)| e.map(|e| sign * e[0][1]));
             let Some(phi) = starts(false).chain(starts(true)).chain(ends).find(|phi| fits(*phi)) else {
+                // No one turn fits them all (a thread's run-out on a chamfer, beside the coaxial
+                // faces it meets): each face of less than a turn that spills is turned on its own
+                // to start on a quarter line; left as it was, its form covered its surface twice
+                // and no kernel took it. A whole turn keeps its group's grid, which its seam and
+                // the circles it shares are labelled on.
+                for &(fi, _, e) in &members {
+                    let Some(e) = e.filter(|e| spilling(&fi) && e[0][1] - e[0][0] < TAU * (1.0 - 1e-9)) else { continue };
+                    let angle = e[0][0];
+                    let Some(face) = self.faces.get(fi) else { continue };
+                    if quarters_turned(&face.surface, e, angle, self.tol).is_none_or(|q| q > 4) {
+                        continue;
+                    }
+                    let Some(surface) = brep::form::turned(&face.surface, angle) else { continue };
+                    let Some(face) = self.faces.get_mut(fi) else { continue };
+                    face.surface = surface;
+                    if let Some(e) = face.extent.as_mut() {
+                        e[0] = [e[0][0] - angle, e[0][1] - angle];
+                    }
+                    turned += 1;
+                }
                 continue;
             };
             for &(fi, sign, _) in &members {
