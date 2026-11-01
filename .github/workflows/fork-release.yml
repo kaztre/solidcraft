@@ -202,9 +202,14 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: fork-release-windows-x64
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+      # SMLib's prebuilt Windows library expects the C runtime as a DLL (/MD), but the packages
+      # link it statically (+crt-static, packaging/windows/package.ps1), so the prebuilt doesn't
+      # link. Compiled from source here instead, where cc follows crt-static (/MT).
+      - name: Fetch SMLib sources (crates/smlib/SMLIB_REV)
         shell: bash
-        run: scripts/fetch-smlib.sh x86_64-pc-windows-msvc
+        run: |
+          rm -rf target/smlib-*-prebuilt/x86_64-pc-windows-msvc
+          scripts/fetch-smlib.sh --source
       - name: Install WiX
         shell: pwsh
         run: |
