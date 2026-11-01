@@ -206,15 +206,23 @@ jobs:
       # link it statically (+crt-static, packaging/windows/package.ps1), so the prebuilt doesn't
       # link. Compiled from source here instead, where cc follows crt-static (/MT).
       - name: Fetch SMLib sources (crates/smlib/SMLIB_REV)
-        shell: bash
-        env:
-          # Git Bash would turn the sparse-checkout paths (/capi/, /source/SMLib/) into Windows
-          # paths, so nothing would be checked out.
-          MSYS_NO_PATHCONV: "1"
+        # PowerShell, not Git Bash: Git Bash turns the sparse-checkout paths (/capi/,
+        # /source/SMLib/) into Windows paths and checks out nothing. The same steps as
+        # scripts/fetch-smlib.sh --source.
+        shell: pwsh
         run: |
-          rm -rf target/smlib-*-prebuilt/x86_64-pc-windows-msvc
-          scripts/fetch-smlib.sh --source
-          ls target/smlib-*/capi/include/smlib.h
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $rev = (Get-Content crates/smlib/SMLIB_REV -Raw).Trim()
+          $dest = "target/smlib-$($rev.Substring(0, 12))"
+          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$dest-prebuilt/x86_64-pc-windows-msvc", $dest
+          git init -q $dest
+          git -C $dest remote add origin https://github.com/tangency-labs/smlib.git
+          git -C $dest sparse-checkout set --no-cone /source/SMLib/ /source/SM_API/ /capi/ /LICENSE
+          git -C $dest fetch -q --depth 1 --filter=blob:none origin $rev
+          git -C $dest checkout -q FETCH_HEAD
+          if (-not (Test-Path "$dest/capi/include/smlib.h")) { throw "SMLib sources $rev are not in $dest" }
+          Write-Output "SMLib sources $rev at $dest"
       - name: Install WiX
         shell: pwsh
         run: |
