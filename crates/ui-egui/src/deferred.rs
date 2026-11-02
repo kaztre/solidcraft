@@ -119,6 +119,9 @@ impl SolveApp {
     /// a while (see the module notes). `Ok(Null)` when it is left computing or waiting its turn:
     /// its outcome then shows as any command's does (an error in the status line).
     pub fn run_heavy(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        if matches!(id, "edit.undo" | "edit.redo" | "timeline.roll_to") {
+            self.close_editor_for_history()?;
+        }
         if self.deferred.is_some() {
             if replaced_by_a_later_one(id) && self.deferred_queue.last().is_some_and(|(q, _)| q == id) {
                 self.deferred_queue.pop();
