@@ -669,3 +669,69 @@ fn an_edge_is_fitted_to_its_own_tolerance() {
     let pc = &pcurves(&plane, &own, 1e-5).unwrap()[0][0];
     assert!(lift_error(&plane, &off, [0., 1.], pc) <= 2e-4);
 }
+
+/// An edge along a spline face's rim built of the same pieces but at another pace inside each (a
+/// thread's helix along its flank's rim, 2217 control points): the two meet at every joint, where
+/// the even checks of a closed form fell, and drift apart between them (0.9 mm on a Cobalt 14
+/// connector, which then drew the flank torn when zoomed in). The rim's line is no closed form of
+/// it.
+#[test]
+fn an_edge_along_a_rim_at_another_pace_between_its_joints_is_no_line() {
+    let surface = Surface::Spline {
+        u_knots: vec![0., 0., 1., 1.],
+        v_knots: vec![0., 0., 1., 1.],
+        // Twisted, so not a plane: its rim at v = 0 is the x axis from 0 to 10.
+        points: vec![vec![[0., 0., 0.], [0., 1., 0.]], vec![[10., 0., 0.], [10., 1., 1.]]],
+    };
+    // Sixteen cubic pieces along the rim (v = 0), each slow then fast: x at its third points a
+    // tenth and a fifth of the way along, not a third and two.
+    let mut knots = vec![0.; 4];
+    let mut points = vec![[0., 0., 0.]];
+    for k in 0..16 {
+        let (a, d) = (10. * k as f64 / 16., 10. / 16.);
+        points.extend([[a + 0.1 * d, 0., 0.], [a + 0.2 * d, 0., 0.], [a + d, 0., 0.]]);
+        knots.extend(if k < 15 { vec![(k + 1) as f64 / 16.; 3] } else { vec![1.; 4] });
+    }
+    let rim = Curve::Spline { knots, points };
+    let pcs = exact_pcurves(&surface, &one(&rim, [0., 1.]), 1e-6, None).unwrap();
+    if let Some(pc) = &pcs[0][0] {
+        let e = lift_error(&surface, &rim, [0., 1.], pc);
+        assert!(e <= 1e-6, "a closed form {e} mm off the edge");
+    }
+}
+
+/// A given pcurve with more control points than the schema takes (SMLib's along a thread's long
+/// helix: 4252, a chain of 1417 cubic pieces, some joined at a turn) is rebuilt within it from its
+/// pieces' ends and tangents: the same curve, not a refusal of the face.
+#[test]
+fn a_given_pcurve_past_the_schemas_size_is_rebuilt_within_it() {
+    let plane = Surface::Plane { origin: [0.; 3], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] };
+    // u = 10 t, v = sin 6t, in 1400 cubic pieces (triple knots); every seventh joint a turn, the
+    // tangent after it half as long again.
+    let n = 1400;
+    let at = |t: f64| [10. * t, (6. * t).sin()];
+    let slope = |t: f64| [10., 6. * (6. * t).cos()];
+    let mut knots = vec![0.; 4];
+    let mut points = vec![at(0.)];
+    for k in 0..n {
+        let (t0, t1) = (k as f64 / n as f64, (k + 1) as f64 / n as f64);
+        let third = (t1 - t0) / 3.;
+        let (p0, p1, d0, d1) = (at(t0), at(t1), slope(t0), slope(t1));
+        let d0 = if k % 7 == 0 && k > 0 { [d0[0] * 1.5, d0[1] * 1.5] } else { d0 };
+        points.push([p0[0] + d0[0] * third, p0[1] + d0[1] * third]);
+        points.push([p1[0] - d1[0] * third, p1[1] - d1[1] * third]);
+        points.push(p1);
+        knots.extend(if k + 1 < n { vec![t1; 3] } else { vec![1.; 4] });
+    }
+    let given = Curve2::Spline { knots, points };
+    let edge = Curve::Line { start: [0., 0., 0.], end: [10., 0., 0.] };
+    let uses = vec![vec![EdgeUse { edge: 0, curve: &edge, interval: [0., 1.], forward: true, tolerance: 0.0, given: Some(&given) }]];
+    let pc = &pcurves_within(&plane, &uses, 1e-6, None).unwrap()[0][0];
+    let Curve2::Spline { points, .. } = pc else { panic!("{pc:?}") };
+    assert!(points.len() <= 4096, "{} control points", points.len());
+    for i in 0..=20_000 {
+        let t = i as f64 / 20_000.;
+        let (p, q) = (eval(pc, t).unwrap(), eval(&given, t).unwrap());
+        assert!((p[0] - q[0]).hypot(p[1] - q[1]) < 1e-9, "at {t}: {p:?} vs {q:?}");
+    }
+}

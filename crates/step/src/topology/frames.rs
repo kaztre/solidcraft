@@ -255,6 +255,12 @@ impl Builder<'_, '_> {
                 None => members
                     .iter()
                     .filter(|(fi, _, _)| spilling(fi))
+                    // A whole turn with a whole circle among its edges stays on its group's grid,
+                    // where the circle starts at its vertex; on a grid of its own the face's seam
+                    // would cut the circle part way round. Without one, a whole turn is turned to
+                    // its seam like a part turn (a Cobalt 14 connector's chamfer, notched by its
+                    // key slot, came in as surfaces).
+                    .filter(|(fi, _, e)| !(e.is_some_and(|e| e[0][1] - e[0][0] >= TAU * (1.0 - 1e-9)) && self.has_whole_circle(*fi)))
                     .filter_map(|(fi, _, e)| {
                         let (f, e) = (self.faces.get(*fi)?, (*e)?);
                         let fits_alone = |angle: &f64| quarters_turned(&f.surface, e, *angle, self.tol).is_some_and(|q| q <= 4);
@@ -273,5 +279,17 @@ impl Builder<'_, '_> {
             }
         }
         Ok(turned)
+    }
+}
+
+impl Builder<'_, '_> {
+    /// Whether a loop of face `fi` uses an edge closed on itself (one vertex at both ends).
+    fn has_whole_circle(&self, fi: usize) -> bool {
+        self.faces.get(fi).is_some_and(|f| {
+            f.loops.iter().any(|l| match l {
+                LoopB::Edges(es) => es.iter().any(|(e, _)| self.edges.get(*e as usize).is_some_and(|x| x.vertices[0] == x.vertices[1])),
+                LoopB::Vertex(_) => false,
+            })
+        })
     }
 }

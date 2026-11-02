@@ -420,6 +420,49 @@ fn round_trip_primitives() {
     round_trip(&torus(Vec3::ZERO, 20.0, 4.0).unwrap());
 }
 
+/// An O-ring as SolidWorks writes it (a Cobalt connector's): one torus face with no bounds, the
+/// whole surface. It was refused ("a face without an edge loop") and the O-ring left out of the
+/// part. It comes in bounded as SolidCraft writes a torus, by a meridian and a parallel through
+/// one vertex, and a ball written the same way by a meridian from pole to pole, both on a frame
+/// turned and moved off the file's axes.
+#[test]
+fn a_whole_torus_or_sphere_face_with_no_bounds_imports_as_a_solid() {
+    use std::f64::consts::PI;
+    let (big, small, ball) = (6.2992, 0.889, 4.0);
+    let mut t = String::from(HEAD);
+    t += "#1=CARTESIAN_POINT('',(3.,-2.,5.));\n#2=DIRECTION('',(1.,2.,2.));\n#3=DIRECTION('',(2.,-2.,1.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n";
+    t += &format!(
+        "#5=TOROIDAL_SURFACE('',#4,{big},{small});\n#6=ADVANCED_FACE('',(),#5,.T.);\n#7=CLOSED_SHELL('',(#6));\n#8=MANIFOLD_SOLID_BREP('O-ring',#7);\n"
+    );
+    t += &format!(
+        "#9=SPHERICAL_SURFACE('',#4,{ball});\n#10=ADVANCED_FACE('',(),#9,.T.);\n#11=CLOSED_SHELL('',(#10));\n#12=MANIFOLD_SOLID_BREP('Ball',#11);\n"
+    );
+    t += "#13=SHAPE_REPRESENTATION('',(#8,#12),$);\n";
+    t += TAIL;
+    let imp = step_import(&t).unwrap();
+    assert_eq!(imp.bodies.len(), 2, "{:?}", imp.warnings);
+    let wants = [
+        ("O-ring", 2.0 * PI * PI * big * small * small, 4.0 * PI * PI * big * small),
+        ("Ball", 4.0 / 3.0 * PI * ball * ball * ball, 4.0 * PI * ball * ball),
+    ];
+    for (b, (name, volume, area)) in imp.bodies.iter().zip(wants) {
+        assert!(b.refused.is_none() && !b.body.is_mesh() && b.closed && b.body.face_count() == 1, "{name}: {:?} {:?}", b.refused, imp.warnings);
+        let m = measure(&b.body).unwrap();
+        assert!(rel(m.volume, volume) < 1e-6 && rel(m.area, area) < 1e-6, "{name}: volume {} area {}", m.volume, m.area);
+        // Round the file's centre, not the origin.
+        assert!(m.centroid.dist(Vec3::new(3.0, -2.0, 5.0)) < 1e-6, "{name}: centroid {:?}", m.centroid);
+        for chord in [0.04, 0.0025] {
+            let (_, stats) = crate::tess::plan(b.body.record(), chord, None).unwrap();
+            assert!(stats.lenient.is_empty() && stats.unmeshed.is_empty(), "{name} at {chord}: {stats:?}");
+        }
+    }
+    // The torus tilted about the file's axis, (1, 2, 2) / 3: as deep along it as its tube is wide.
+    let bb = imp.bodies[0].body.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().bounds();
+    let (lo, hi) = (bb.min.z, bb.max.z);
+    let half = big * (1.0 - (2.0f64 / 3.0).powi(2)).sqrt() + small;
+    assert!((hi - 5.0 - half).abs() < 1e-3 && (5.0 - lo - half).abs() < 1e-3, "torus z {lo}..{hi}");
+}
+
 #[test]
 fn round_trip_features() {
     let plate = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 10.0)).unwrap();
@@ -480,7 +523,27 @@ fn half_tube_a_hair_off_its_torus_imports_as_a_solid() {
 /// A B-spline curve through `points` at `params` (cubic interpolation) as STEP entities from
 /// `#id`, its own entity `#id`; the ids it used next.
 fn spline_curve(id: u64, params: &[f64], points: &[[f64; 3]]) -> (String, u64) {
-    let c = solidcraft_geom::bspline::CurveN::<3>::interpolate(params, points, 3).unwrap();
+    spline_entities(id, &solidcraft_geom::bspline::CurveN::<3>::interpolate(params, points, 3).unwrap())
+}
+
+/// A chain of cubic pieces through `points` at `params`, piece `k`'s tangent at point `j` (per
+/// unit of `params`) `slope(k, j)`: each piece its ends' points and tangents, a triple knot
+/// between, so its pace may change at every joint. As [`spline_curve`].
+fn piece_chain(id: u64, params: &[f64], points: &[[f64; 3]], slope: &dyn Fn(usize, usize) -> [f64; 3]) -> (String, u64) {
+    let mut knots = vec![params[0]; 4];
+    let mut ctrl = vec![points[0]];
+    for k in 0..params.len() - 1 {
+        let third = (params[k + 1] - params[k]) / 3.0;
+        let (p, q, a, b) = (points[k], points[k + 1], slope(k, k), slope(k, k + 1));
+        ctrl.push([0, 1, 2].map(|d| p[d] + a[d] * third));
+        ctrl.push([0, 1, 2].map(|d| q[d] - b[d] * third));
+        ctrl.push(q);
+        knots.extend(vec![params[k + 1]; if k + 2 < params.len() { 3 } else { 4 }]);
+    }
+    spline_entities(id, &solidcraft_geom::bspline::CurveN { degree: 3, knots, ctrl })
+}
+
+fn spline_entities(id: u64, c: &solidcraft_geom::bspline::CurveN<3>) -> (String, u64) {
     let mut s = String::new();
     let mut refs = Vec::new();
     for (k, p) in c.ctrl.iter().enumerate() {
@@ -570,6 +633,84 @@ fn a_helical_strip_of_several_turns_imports_as_one_face() {
     }
 }
 
+/// Two coaxial bands of a cylinder sharing a circle: a whole turn whose seam is at 1 rad (its rim
+/// two arcs, no whole circle), and above it 340° of a turn from 2.35 rad, a slot cut out of it. No one turn of their frames puts both on
+/// the quarter grid (the whole turn's seam on a quarter line, the 340° within four quarters), so
+/// each is turned on its own. The whole turn kept its group's grid and its form ran a quarter past
+/// its seam: a Cobalt 14 connector's chamfer, notched by its key slot, came in as surfaces.
+#[test]
+fn coaxial_faces_no_one_turn_suits_are_each_turned_to_their_start() {
+    use std::f64::consts::TAU;
+    let (r, seam, slot) = (5.0, 1.0, [2.0, 2.0 + 20f64.to_radians()]);
+    let mut t = String::from(HEAD);
+    let mut n = 0u64;
+    let mut add = |t: &mut String, body: String| {
+        n += 1;
+        *t += &format!("#{n}={body};\n");
+        n
+    };
+    let point = |t: &mut String, add: &mut dyn FnMut(&mut String, String) -> u64, a: f64, z: f64| {
+        let p = add(t, format!("CARTESIAN_POINT('',({:.16},{:.16},{z:.1}))", r * a.cos(), r * a.sin()));
+        add(t, format!("VERTEX_POINT('',#{p})"))
+    };
+    let (v0, v1, v2, v3) = (
+        point(&mut t, &mut add, seam, 0.0),
+        point(&mut t, &mut add, seam, 4.0),
+        point(&mut t, &mut add, slot[0], 4.0),
+        point(&mut t, &mut add, slot[1], 4.0),
+    );
+    let (v4, v5, v6) = (point(&mut t, &mut add, slot[0], 8.0), point(&mut t, &mut add, slot[1], 8.0), point(&mut t, &mut add, 3.0, 0.0));
+    let (zd, xd) = (add(&mut t, "DIRECTION('',(0.,0.,1.))".into()), add(&mut t, "DIRECTION('',(1.,0.,0.))".into()));
+    let mut circle = |t: &mut String, z: f64| {
+        let o = add(t, format!("CARTESIAN_POINT('',(0.,0.,{z:.1}))"));
+        let a = add(t, format!("AXIS2_PLACEMENT_3D('',#{o},#{zd},#{xd})"));
+        let c = add(t, format!("CIRCLE('',#{a},{r:.1})"));
+        (a, c)
+    };
+    let ((axis, c0), (_, c4), (_, c8)) = (circle(&mut t, 0.0), circle(&mut t, 4.0), circle(&mut t, 8.0));
+    let mut line = |t: &mut String, a: f64, z: f64| {
+        let p = add(t, format!("CARTESIAN_POINT('',({:.16},{:.16},{z:.1}))", r * a.cos(), r * a.sin()));
+        let v = add(t, format!("VECTOR('',#{zd},1.)"));
+        add(t, format!("LINE('',#{p},#{v})"))
+    };
+    let (l_seam, l0, l1) = (line(&mut t, seam, 0.0), line(&mut t, slot[0], 4.0), line(&mut t, slot[1], 4.0));
+    let mut edge = |t: &mut String, a: u64, b: u64, c: u64| add(t, format!("EDGE_CURVE('',#{a},#{b},#{c},.T.)"));
+    let (e0, e8) = (edge(&mut t, v0, v6, c0), edge(&mut t, v6, v0, c0));
+    let e1 = edge(&mut t, v0, v1, l_seam);
+    let e2 = edge(&mut t, v1, v2, c4);
+    let e3 = edge(&mut t, v2, v3, c4);
+    let e4 = edge(&mut t, v3, v1, c4);
+    let e5 = edge(&mut t, v3, v5, l1);
+    let e6 = edge(&mut t, v5, v4, c8);
+    let e7 = edge(&mut t, v2, v4, l0);
+    let surface = add(&mut t, format!("CYLINDRICAL_SURFACE('',#{axis},{r:.1})"));
+    let mut face = |t: &mut String, uses: &[(u64, bool)]| {
+        let oes: Vec<String> =
+            uses.iter().map(|(e, o)| format!("#{}", add(t, format!("ORIENTED_EDGE('',*,*,#{e},{})", if *o { ".T." } else { ".F." })))).collect();
+        let l = add(t, format!("EDGE_LOOP('',({}))", oes.join(",")));
+        let b = add(t, format!("FACE_OUTER_BOUND('',#{l},.T.)"));
+        add(t, format!("ADVANCED_FACE('',(#{b}),#{surface},.T.)"))
+    };
+    // Counter-clockwise in (angle, height) about the outward normal.
+    let whole = face(&mut t, &[(e0, true), (e8, true), (e1, true), (e4, false), (e3, false), (e2, false), (e1, false)]);
+    let slotted = face(&mut t, &[(e4, true), (e2, true), (e7, true), (e6, false), (e5, false)]);
+    t += &format!("#900=OPEN_SHELL('',(#{whole},#{slotted}));\n#901=SHELL_BASED_SURFACE_MODEL('Bands',(#900));\n");
+    t += &context(910, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += "#920=MANIFOLD_SURFACE_SHAPE_REPRESENTATION('',(#901),#910);\n";
+    t += TAIL;
+    let imp = step_import(&t).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let b = &imp.bodies[0];
+    assert!(b.refused.is_none() && !b.body.is_mesh() && b.body.face_count() == 2, "{:?} {:?}", b.refused, imp.warnings);
+    let want = TAU * r * 4.0 + (TAU - (slot[1] - slot[0])) * r * 4.0;
+    let area = measure(&b.body).unwrap().area;
+    assert!(rel(area, want) < 1e-6, "area {area} vs {want}");
+    for chord in [0.04, 0.0025] {
+        let (_, stats) = crate::tess::plan(b.body.record(), chord, None).unwrap();
+        assert!(stats.lenient.is_empty() && stats.unmeshed.is_empty(), "at {chord}: {stats:?}");
+    }
+}
+
 /// A thread's crest as SolidWorks writes it (a Cobalt bulkhead connector's): one cylinder face
 /// from a rim circle down to the end of the part, less a helical groove cut round it several
 /// turns. It is bounded by the rim and by one loop round the groove, down its upper edge, along
@@ -577,27 +718,49 @@ fn a_helical_strip_of_several_turns_imports_as_one_face() {
 /// with a seam from where the groove starts up to the rim. The seam ran from the loop's first
 /// vertex, at the part's end, up to the rim, across every turn of the groove: the face crossed
 /// itself in (u, v) and was drawn as the whole cylinder one and a half times over, hiding the
-/// thread.
+/// thread. With helices of many uneven pieces (160 a turn, every other one twice as long in its
+/// parameter, as a Cobalt connector's are), their pcurves follow them: through points evenly
+/// spaced in the parameter they strayed 0.1 mm off between them, and the thread was drawn torn
+/// when zoomed in.
 #[test]
 fn a_thread_crest_round_a_helical_groove_is_drawn_as_itself() {
+    for uneven in [false, true] {
+        thread_crest_drawn_as_itself(uneven);
+    }
+}
+
+fn thread_crest_drawn_as_itself(uneven: bool) {
     use std::f64::consts::TAU;
     // Radius, pitch, the groove's width along the axis, its top, where it starts, the rim's height.
     let (r, pitch, gap, top, start, rim) = (5.0, 1.5, 0.9, 7.2, 1.0, 10.0);
     // The groove's upper edge reaches the end (z 0) at angle `a_end` past its start, its lower one
     // earlier, at `b_end`.
     let (a_end, b_end) = (TAU * top / pitch, TAU * (top - gap) / pitch);
-    let helix = |drop: f64, sweep: f64| -> (Vec<f64>, Vec<[f64; 3]>) {
-        let n = (sweep / TAU * 32.0).ceil() as usize;
-        let params: Vec<f64> = (0..=n).map(|k| sweep * k as f64 / n as f64).collect();
-        let points = params.iter().map(|t| [r * (start + t).cos(), r * (start + t).sin(), top - drop - pitch * t / TAU]).collect();
-        (params, points)
+    let helix = |drop: f64, sweep: f64| -> (Vec<f64>, Vec<f64>, Vec<[f64; 3]>) {
+        let n = (sweep / TAU * if uneven { 160.0 } else { 32.0 }).ceil() as usize;
+        let angles: Vec<f64> = (0..=n).map(|k| sweep * k as f64 / n as f64).collect();
+        let points = angles.iter().map(|t| [r * (start + t).cos(), r * (start + t).sin(), top - drop - pitch * t / TAU]).collect();
+        // Uneven: pieces of 2 and 3 in the parameter by turns.
+        let params: Vec<f64> = if uneven { (0..=n).map(|k| (5 * (k / 2) + 2 * (k % 2)) as f64).collect() } else { angles.clone() };
+        (angles, params, points)
     };
-    let (pa, upper) = helix(0.0, a_end);
-    let (pb, lower) = helix(gap, b_end);
+    let (aa, pa, upper) = helix(0.0, a_end);
+    let (ab, pb, lower) = helix(gap, b_end);
     let mut t = String::from(HEAD);
-    let (a, next) = spline_curve(1000, &pa, &upper);
+    // Each piece the helix's tangent at its own pace.
+    let chain = |id: u64, angles: &[f64], params: &[f64], points: &[[f64; 3]]| {
+        if !uneven {
+            return spline_curve(id, params, points);
+        }
+        let slope = |k: usize, j: usize| {
+            let pace = (angles[k + 1] - angles[k]) / (params[k + 1] - params[k]);
+            [-r * (start + angles[j]).sin(), r * (start + angles[j]).cos(), -pitch / TAU].map(|x| x * pace)
+        };
+        piece_chain(id, params, points, &slope)
+    };
+    let (a, next) = chain(1000, &aa, &pa, &upper);
     t += &a;
-    let (b, _) = spline_curve(next, &pb, &lower);
+    let (b, _) = chain(next, &ab, &pb, &lower);
     t += &b;
     let point = |p: [f64; 3]| format!("({:.16},{:.16},{:.16})", p[0], p[1], p[2]);
     t += &format!(
@@ -630,6 +793,24 @@ fn a_thread_crest_round_a_helical_groove_is_drawn_as_itself() {
     assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
     let b = &imp.bodies[0];
     assert!(b.refused.is_none() && !b.body.is_mesh() && b.body.face_count() == 1, "{:?} {:?}", b.refused, imp.warnings);
+    // The pieces on the cylinder exactly: every pcurve on its edge, so no edge's tolerance was
+    // raised to cover a stray one (the interpolated helices lie 0.0002 mm off it).
+    let record = b.body.record();
+    let on = solidcraft_geom::brep::eval::SurfaceEval::new(&record.faces[0].surface).unwrap();
+    assert!(!uneven || !imp.warnings.iter().any(|w| w.contains("lie off")), "{:?}", imp.warnings);
+    for l in record.faces[0].loops.iter().filter(|_| uneven) {
+        let solidcore_record::brep::Loop::Edges { edges } = l else { continue };
+        for oe in edges {
+            let edge = &record.edges[oe.edge as usize];
+            let c = solidcraft_geom::brep::eval::CurveEval::new(edge.nurbs.as_ref().unwrap_or(&edge.curve)).unwrap();
+            let [lo, hi] = edge.interval;
+            for k in 0..=4000 {
+                let t = lo + (hi - lo) * k as f64 / 4000.0;
+                let off = on.point(solidcraft_geom::brep::pcurve::eval(&oe.pcurve, t).unwrap()).unwrap().dist(c.point(t).unwrap());
+                assert!(off < 1e-4, "edge {} {off} mm off its pcurve at {t}", oe.edge);
+            }
+        }
+    }
     // The band less the groove: its full height while the lower edge runs, then down to nothing.
     let want = TAU * r * rim - r * gap * (a_end + b_end) / 2.0;
     let area = measure(&b.body).unwrap().area;

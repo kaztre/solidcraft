@@ -767,3 +767,31 @@ fn a_whole_turn_starting_a_hair_before_a_quarter_line_has_its_form_from_the_line
     let u = turn(PI - 0.3);
     assert!((u[0] - 1.0).abs() < 1e-12, "from the quarter before: {u:?}");
 }
+
+/// An end within its tolerance of a quarter line ends there only where that saves a form of four
+/// quarters or more. An O-ring groove's torus (tube radius 0.4 mm, in a file of 0.02 mm) from
+/// 105° round its tube to its floor at 272.65°, 0.0187 mm past the quarter line at 270°, had its
+/// form cut at 270°: the floor's circle came in on the form's edge, the seam up to it past it, and
+/// the face's boundary doubled back on itself there. Half a tube a hair past both quarter lines
+/// still has its form from line to line, not round the whole tube; an end a rounding off one is on
+/// it.
+#[test]
+fn an_end_near_a_quarter_line_ends_on_it_only_to_save_a_quarter_of_four() {
+    let torus = Surface::Torus { frame: a_frame(), major_radius: 6.95, minor_radius: 0.4046, tube_start: 0. };
+    let tube = |v: [f64; 2]| {
+        let (s, domain) = form::surface_within(&torus, [[0.3, 1.2], v], 0.02).expect("a form");
+        let Surface::RationalSpline { v_knots, .. } = s else { panic!("not a NURBS: {s:?}") };
+        ((v_knots.first().copied().unwrap(), v_knots.last().copied().unwrap()), domain[1])
+    };
+    let (knots, domain) = tube([105f64.to_radians(), 272.65f64.to_radians()]);
+    assert_eq!(knots, (1.0, 4.0), "the floor's quarter is on the form");
+    assert!(domain[1] > 3.0 && domain[1] < 3.1, "the face ends past 270 degrees: {domain:?}");
+    let (knots, domain) = tube([89.9f64.to_radians(), 270.1f64.to_radians()]);
+    assert_eq!(knots, (1.0, 3.0), "half a tube from line to line");
+    assert_eq!(domain, [1.0, 3.0]);
+    // An end a rounding short of a quarter line is on it however few quarters (a quarter of a
+    // cylinder on a circuit board from 1.26e-11 rad before 90 degrees took the quarter before too,
+    // and its loop jumped across the form).
+    let (knots, _) = tube([FRAC_PI_2 - 1.3e-11, PI]);
+    assert_eq!(knots, (1.0, 2.0), "from the line at 90 degrees");
+}

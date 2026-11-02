@@ -54,21 +54,30 @@ pub fn angle(s: f64) -> f64 {
     q * FRAC_PI_2 + quarter_psi(s - q)
 }
 
-/// The quarters an angle interval needs: the first one and how many. An end within `reach` (an
-/// angle) of a quarter's end is on it: a face whose boundary lies within its tolerance of a
-/// quarter's end needs no part of the quarter past it.
+/// The quarters an angle interval needs: the first one and how many. An end within rounding of a
+/// quarter's end is on it; where it would need four or more, so is one within `reach` (an angle):
+/// a face whose boundary lies within its tolerance of a quarter's end needs no part of the quarter
+/// past it, and its form then neither closes on itself nor spills into a fifth. Fewer are not cut
+/// to the tolerance: cut short, the form ended inside the face (an O-ring groove's floor 0.02 mm
+/// round its tube past a quarter, in a file of 0.02 mm), and its boundary there doubled back.
 fn quarters([a0, a1]: [f64; 2], reach: f64) -> Option<(f64, usize)> {
     if !(a0.is_finite() && a1.is_finite() && a1 > a0 && a1 - a0 <= TAU * (1.0 + 1e-9)) {
         return None;
     }
-    let on_end = |a: f64| {
+    let count = |a0: f64, a1: f64| {
+        let q0 = quarter_of(a0);
+        let q1 = (a1 / FRAC_PI_2 - SLACK).ceil();
+        (q0, (q1 - q0).max(1.0) as usize)
+    };
+    let on_end = |a: f64, reach: f64| {
         let end = (a / FRAC_PI_2).round() * FRAC_PI_2;
         if (a - end).abs() <= reach { end } else { a }
     };
-    let (a0, a1) = (on_end(a0), on_end(a1));
-    let q0 = quarter_of(a0);
-    let q1 = (a1 / FRAC_PI_2 - SLACK).ceil();
-    let n = (q1 - q0).max(1.0) as usize;
+    let rounding = reach.min(1e-9);
+    let (q0, n) = match count(on_end(a0, rounding), on_end(a1, rounding)) {
+        (q0, n) if n < 4 => (q0, n),
+        _ => count(on_end(a0, reach), on_end(a1, reach)),
+    };
     (n <= 5).then_some((q0, n))
 }
 

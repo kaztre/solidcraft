@@ -58,6 +58,10 @@ pub struct EdgeUse<'a> {
 
 /// Knot spans a fitted pcurve may have (the schema takes 4096 control points).
 const MAX_SPANS: usize = 4000;
+/// Control points the schema takes in a pcurve.
+const MAX_POINTS: usize = 4096;
+/// Most control points of a given pcurve [`reduced`] takes on.
+const MAX_REDUCED: usize = 1 << 16;
 /// Edge uses of one face.
 const MAX_USES: usize = 100_000;
 /// Lift checks of an exact pcurve: evenly spaced, plus one inside each of its spans up to this.
@@ -140,8 +144,19 @@ fn each_pcurve(surface_record: &Surface, on: &On, loops: &[Vec<EdgeUse<'_>>], to
     for (w, l) in loops.iter().enumerate() {
         let mut pcs = Vec::with_capacity(l.len());
         for (i, u) in l.iter().enumerate() {
+            // An edge record that holds a looser tolerance than the face's (another kernel's
+            // approximated edge) is checked against its own, up to the same cap.
+            let own = if u.tolerance.is_finite() && u.tolerance <= 1e3 { tolerance.max(u.tolerance) } else { tolerance };
             if let Some(given) = u.given {
-                pcs.push(Ok(own_pcurve(given, u.interval, &mut budget).map_err(|e| Error::Invalid(format!("loop {w} use {i}: {e}")))?));
+                let pc = match own_pcurve(given, u.interval, &mut budget) {
+                    Ok(pc) => pc,
+                    Err(e) => match reduced(given, on, 0.25 * own) {
+                        Some(r) => own_pcurve(&r, u.interval, &mut budget),
+                        None => Err(e),
+                    }
+                    .map_err(|e| Error::Invalid(format!("loop {w} use {i}: {e}")))?,
+                };
+                pcs.push(Ok(pc));
                 continue;
             }
             if let Some((_, pc)) = done.iter().find(|(e, _)| *e == u.edge) {
@@ -153,9 +168,6 @@ fn each_pcurve(surface_record: &Surface, on: &On, loops: &[Vec<EdgeUse<'_>>], to
                 .map_err(|e| Error::Invalid(format!("loop {w} use {i}: {e}")))?;
             check_interval(&u.interval, u.curve.natural()).map_err(|e| Error::Invalid(format!("loop {w} use {i}: {e}")))?;
             let c = CurveEval::new(u.curve)?;
-            // An edge record that holds a looser tolerance than the face's (another kernel's
-            // approximated edge) is checked against its own, up to the same cap.
-            let own = if u.tolerance.is_finite() && u.tolerance <= 1e3 { tolerance.max(u.tolerance) } else { tolerance };
             let pc = on.pcurve(u.curve, &c, u.interval, own).map_err(|e| {
                 let at = |t: f64| c.point(t).map(|p| [p.x, p.y, p.z]);
                 let message = format!("pcurve of loop {w} use {i} ({:?} to {:?}): {e}", at(u.interval[0]), at(u.interval[1]));
@@ -228,6 +240,64 @@ fn own_pcurve(c: &Curve2, [t0, t1]: [f64; 2], budget: &mut Budget) -> Result<Cur
         return Err(Error::Invalid(format!("given pcurve on [{a}, {b}], its edge on [{t0}, {t1}]")));
     }
     Ok(c.clone())
+}
+
+/// A given pcurve with more control points than the schema takes (SMLib's along a thread's long
+/// helix: 4252, a chain of 1417 cubic pieces, most of them joined tangent) rebuilt from its points
+/// and one-sided tangents at its knots ([`hermite`]: each piece exactly, a double knot
+/// where it is tangent to the next), at fewer of its knots if that is still too many, where that
+/// lifts within `target` of it on the face's surface; else `None`.
+fn reduced(given: &Curve2, on: &On, target: f64) -> Option<Curve2> {
+    let (knots, count) = match given {
+        Curve2::Spline { knots, points } => (knots, points.len()),
+        Curve2::RationalSpline { knots, homogeneous } => (knots, homogeneous.len()),
+    };
+    if count <= MAX_POINTS || count > MAX_REDUCED {
+        return None;
+    }
+    let [a, b] = given.interval()?;
+    let mut ts: Vec<f64> = knots.iter().copied().filter(|t| *t >= a && *t <= b).collect();
+    ts.dedup();
+    // Each knot's tangents from before it and after it (second-order one-sided differences).
+    let h = 1e-7 * (b - a);
+    let side = |t: f64, s: f64| -> Option<[f64; 2]> {
+        let (p0, p1, p2) = (eval(given, t)?, eval(given, t + s * h)?, eval(given, t + 2.0 * s * h)?);
+        Some([0, 1].map(|d| s * (4.0 * p1[d] - 3.0 * p0[d] - p2[d]) / (2.0 * h)))
+    };
+    let tangents_at = |t: f64| -> Option<[[f64; 2]; 2]> {
+        let before = if t > a { side(t, -1.0)? } else { side(t, 1.0)? };
+        let after = if t < b { side(t, 1.0)? } else { before };
+        Some([before, after])
+    };
+    let mut stride = 1;
+    loop {
+        let last = ts.len().checked_sub(1).filter(|n| *n > 0)?;
+        let at: Vec<f64> = (0..=last).step_by(stride).chain((last % stride != 0).then_some(last)).filter_map(|k| ts.get(k).copied()).collect();
+        let points = at.iter().map(|t| eval(given, *t)).collect::<Option<Vec<_>>>()?;
+        let tangents = at.iter().map(|t| tangents_at(*t)).collect::<Option<Vec<_>>>()?;
+        let c = hermite(&at, &points, &tangents)?;
+        let size = match &c {
+            Curve2::Spline { points, .. } => points.len(),
+            Curve2::RationalSpline { homogeneous, .. } => homogeneous.len(),
+        };
+        if size > MAX_POINTS {
+            stride += 1;
+            if stride > 8 {
+                return None;
+            }
+            continue;
+        }
+        // Within `target` of the given one on the surface, through each new span.
+        let close = at.windows(2).all(|w| {
+            let (Some(&t0), Some(&t1)) = (w.first(), w.get(1)) else { return false };
+            [0.25, 0.5, 0.75].iter().all(|f| {
+                let t = t0 + (t1 - t0) * f;
+                let lift = |pc: &Curve2| eval(pc, t).and_then(|q| on.surface.point(q));
+                matches!((lift(&c), lift(given)), (Some(p), Some(q)) if p.dist(q) <= target)
+            })
+        });
+        return close.then_some(c);
+    }
 }
 
 /// `c` cut exactly to `[t0, t1]` where that is less than its knot interval.
@@ -322,7 +392,7 @@ impl On {
 
     fn pcurve(&self, record: &Curve, curve: &CurveEval, range: [f64; 2], tol: f64) -> Result<Curve2> {
         if let Some(pc) = self.exact(record, curve, range, tol)?
-            && self.lifts(&pc, curve, range, 0.5 * tol)
+            && self.lifts(&pc, record, curve, range, 0.5 * tol)
         {
             return Ok(pc);
         }
@@ -411,7 +481,7 @@ impl On {
                 let u = b.atan2(a);
                 Some(segment([u, height(t0)?], [u, height(t1)?]))
             }
-            (SurfaceEval::Eval(..), _) => self.along(curve, [t0, t1], tol),
+            (SurfaceEval::Eval(..), _) => self.along(record, curve, [t0, t1], tol),
             _ => None,
         })
     }
@@ -454,7 +524,7 @@ impl On {
     /// the same quarter grid, whose two ends are one point on the seam). A candidate is taken only
     /// where it lifts onto the edge within the record's tolerance, as the closed forms on analytic
     /// surfaces must: the closed form the geometry has, never a fit.
-    fn along(&self, curve: &CurveEval, [t0, t1]: [f64; 2], tol: f64) -> Option<Curve2> {
+    fn along(&self, record: &Curve, curve: &CurveEval, [t0, t1]: [f64; 2], tol: f64) -> Option<Curve2> {
         let (p0, p1, pm) = (curve.point(t0)?, curve.point(t1)?, curve.point(0.5 * (t0 + t1))?);
         let size = [p0, p1, pm].iter().flat_map(|p| [p.x.abs(), p.y.abs(), p.z.abs()]).fold(1.0, f64::max);
         // Within the record's tolerance, as the closed forms on analytic surfaces are, and never
@@ -491,19 +561,32 @@ impl On {
                 }
             }
         }
-        candidates.into_iter().find(|pc| self.lifts(pc, curve, [t0, t1], exact))
+        candidates.into_iter().find(|pc| self.lifts(pc, record, curve, [t0, t1], exact))
     }
 
-    /// Whether `pc` lifts onto `curve` within `target` along `range` (evenly, and inside its
-    /// spans).
-    fn lifts(&self, pc: &Curve2, curve: &CurveEval, [t0, t1]: [f64; 2], target: f64) -> bool {
+    /// Whether `pc` lifts onto `curve` (`record` evaluated) within `target` along `range`
+    /// (evenly, and inside the spans of both). Inside the edge's own spans too: a thread's helix
+    /// and the flank's rim it runs along, built of the same pieces, meet at every joint (which the
+    /// even checks fell on) and drift 0.9 mm apart between them, where the edge's pace is not the
+    /// surface's.
+    fn lifts(&self, pc: &Curve2, record: &Curve, curve: &CurveEval, [t0, t1]: [f64; 2], target: f64) -> bool {
         let knots = match pc {
             Curve2::Spline { knots, .. } | Curve2::RationalSpline { knots, .. } => knots,
         };
+        let own: &[f64] = match record {
+            Curve::Spline { knots, .. } | Curve::RationalSpline { knots, .. } => knots,
+            _ => &[],
+        };
+        let inside = own
+            .windows(2)
+            .filter_map(|k| Some((*k.first()?, *k.get(1)?)))
+            .filter(|(a, b)| a < b && *b > t0 && *a < t1)
+            .take(1 << 12)
+            .map(|(a, b)| 0.5 * (a.max(t0) + b.min(t1)));
         // The ends exactly: `t0 + (t1 − t0)·1` may round past `t1`, where the pcurve has no point.
         let even = (0..=CHECKS).map(|k| if k == CHECKS { t1 } else { t0 + (t1 - t0) * k as f64 / CHECKS as f64 });
         let spans = knots.windows(2).filter_map(|k| Some((*k.first()?, *k.get(1)?))).filter(|(a, b)| a < b).take(1 << 12).map(|(a, b)| 0.5 * (a + b));
-        even.chain(spans).all(|t| {
+        even.chain(spans).chain(inside).all(|t| {
             let lifted = eval(pc, t).and_then(|q| self.surface.point(q));
             matches!((lifted, curve.point(t)), (Some(a), Some(b)) if a.dist(b) <= target)
         })
@@ -726,3 +809,48 @@ fn basis(knots: &[f64], p: usize, span: usize, t: f64) -> Option<Vec<f64>> {
 #[cfg(test)]
 #[path = "pcurve_tests.rs"]
 pub(super) mod tests;
+
+/// The cubic through `points` at the increasing parameters `params` (at least two), one span
+/// between each two, with the tangents `tangents` gives each point from before it and after
+/// it: joined tangent (a double knot) where the two agree, else only joined (a triple knot), so
+/// a chain of cubic pieces comes back exactly from its ends' points and tangents. `None` for
+/// mismatched or non-increasing input.
+pub fn hermite(params: &[f64], points: &[[f64; 2]], tangents: &[[[f64; 2]; 2]]) -> Option<Curve2> {
+    if params.len() < 2
+        || points.len() != params.len()
+        || tangents.len() != params.len()
+        || params.windows(2).any(|w| !matches!((w.first(), w.get(1)), (Some(a), Some(b)) if a < b))
+    {
+        return None;
+    }
+    let (&a, &b) = (params.first()?, params.last()?);
+    let mut knots = vec![a; 4];
+    let mut out = Vec::with_capacity(3 * params.len());
+    out.push(*points.first()?);
+    let at = |p: [f64; 2], d: [f64; 2], by: f64| [p[0] + d[0] * by, p[1] + d[1] * by];
+    for k in 0..params.len() - 1 {
+        let (t0, t1) = (*params.get(k)?, *params.get(k + 1)?);
+        let (p0, p1) = (*points.get(k)?, *points.get(k + 1)?);
+        let ([_, d0], [d1, after]) = (*tangents.get(k)?, *tangents.get(k + 1)?);
+        let third = (t1 - t0) / 3.0;
+        out.push(at(p0, d0, third));
+        if k + 2 == params.len() {
+            out.push(at(p1, d1, -third));
+            break;
+        }
+        let size = d1[0].hypot(d1[1]).max(after[0].hypot(after[1]));
+        if (d1[0] - after[0]).hypot(d1[1] - after[1]) <= 1e-6 * size {
+            // One tangent both sides, so the double knot's neighbours and the point line up.
+            let d = [0.5 * (d1[0] + after[0]), 0.5 * (d1[1] + after[1])];
+            out.push(at(p1, d, -third));
+            knots.extend([t1, t1]);
+        } else {
+            out.push(at(p1, d1, -third));
+            out.push(p1);
+            knots.extend([t1, t1, t1]);
+        }
+    }
+    out.push(*points.last()?);
+    knots.extend([b; 4]);
+    Some(Curve2::Spline { knots, points: out })
+}
