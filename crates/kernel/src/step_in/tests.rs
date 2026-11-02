@@ -569,6 +569,88 @@ fn a_helical_strip_of_several_turns_imports_as_one_face() {
     }
 }
 
+/// A thread's crest as SolidWorks writes it (a Cobalt bulkhead connector's): one cylinder face
+/// from a rim circle down to the end of the part, less a helical groove cut round it several
+/// turns. It is bounded by the rim and by one loop round the groove, down its upper edge, along
+/// the crest at the part's end, back up its lower edge and across where it starts, and comes in
+/// with a seam from where the groove starts up to the rim. The seam ran from the loop's first
+/// vertex, at the part's end, up to the rim, across every turn of the groove: the face crossed
+/// itself in (u, v) and was drawn as the whole cylinder one and a half times over, hiding the
+/// thread.
+#[test]
+fn a_thread_crest_round_a_helical_groove_is_drawn_as_itself() {
+    use std::f64::consts::TAU;
+    // Radius, pitch, the groove's width along the axis, its top, where it starts, the rim's height.
+    let (r, pitch, gap, top, start, rim) = (5.0, 1.5, 0.9, 7.2, 1.0, 10.0);
+    // The groove's upper edge reaches the end (z 0) at angle `a_end` past its start, its lower one
+    // earlier, at `b_end`.
+    let (a_end, b_end) = (TAU * top / pitch, TAU * (top - gap) / pitch);
+    let helix = |drop: f64, sweep: f64| -> (Vec<f64>, Vec<[f64; 3]>) {
+        let n = (sweep / TAU * 32.0).ceil() as usize;
+        let params: Vec<f64> = (0..=n).map(|k| sweep * k as f64 / n as f64).collect();
+        let points = params.iter().map(|t| [r * (start + t).cos(), r * (start + t).sin(), top - drop - pitch * t / TAU]).collect();
+        (params, points)
+    };
+    let (pa, upper) = helix(0.0, a_end);
+    let (pb, lower) = helix(gap, b_end);
+    let mut t = String::from(HEAD);
+    let (a, next) = spline_curve(1000, &pa, &upper);
+    t += &a;
+    let (b, _) = spline_curve(next, &pb, &lower);
+    t += &b;
+    let point = |p: [f64; 3]| format!("({:.16},{:.16},{:.16})", p[0], p[1], p[2]);
+    t += &format!(
+        "#1=CARTESIAN_POINT('',{});\n#2=VERTEX_POINT('',#1);\n#3=CARTESIAN_POINT('',{});\n#4=VERTEX_POINT('',#3);\n#5=CARTESIAN_POINT('',{});\n#6=VERTEX_POINT('',#5);\n#7=CARTESIAN_POINT('',{});\n#8=VERTEX_POINT('',#7);\n#9=CARTESIAN_POINT('',({r:.1},0.,{rim:.1}));\n#10=VERTEX_POINT('',#9);\n",
+        point(upper[0]),
+        point(*upper.last().unwrap()),
+        point(*lower.last().unwrap()),
+        point(lower[0]),
+    );
+    t += "#40=CARTESIAN_POINT('',(0.,0.,0.));\n#41=DIRECTION('',(0.,0.,1.));\n#42=DIRECTION('',(1.,0.,0.));\n#43=AXIS2_PLACEMENT_3D('',#40,#41,#42);\n";
+    t += &format!(
+        "#44=CYLINDRICAL_SURFACE('',#43,{r:.1});\n#45=CIRCLE('',#43,{r:.1});\n#46=CARTESIAN_POINT('',(0.,0.,{rim:.1}));\n#47=AXIS2_PLACEMENT_3D('',#46,#41,#42);\n#48=CIRCLE('',#47,{r:.1});\n"
+    );
+    // Where the groove starts: a line along the axis from its lower edge up to its upper one.
+    t += "#49=VECTOR('',#41,1.);\n#50=LINE('',#7,#49);\n";
+    // The upper edge down, the crest round the end from it to the lower edge, the lower edge
+    // back up, across the start; the rim round once.
+    t += &format!(
+        "#20=EDGE_CURVE('',#2,#4,#1000,.T.);\n#21=EDGE_CURVE('',#4,#6,#45,.T.);\n#22=EDGE_CURVE('',#8,#6,#{next},.T.);\n#23=EDGE_CURVE('',#8,#2,#50,.T.);\n#24=EDGE_CURVE('',#10,#10,#48,.T.);\n"
+    );
+    // The loop round the groove starts at the end of the part, so its first vertex is far from
+    // the rim; the face lies to the left in (angle, height) of both loops.
+    t += "#30=ORIENTED_EDGE('',*,*,#21,.T.);\n#31=ORIENTED_EDGE('',*,*,#22,.F.);\n#32=ORIENTED_EDGE('',*,*,#23,.T.);\n#33=ORIENTED_EDGE('',*,*,#20,.T.);\n#34=EDGE_LOOP('',(#30,#31,#32,#33));\n";
+    t += "#35=ORIENTED_EDGE('',*,*,#24,.F.);\n#36=EDGE_LOOP('',(#35));\n#37=FACE_OUTER_BOUND('',#34,.T.);\n#38=FACE_BOUND('',#36,.T.);\n";
+    t += "#60=ADVANCED_FACE('',(#37,#38),#44,.T.);\n#61=OPEN_SHELL('',(#60));\n#62=SHELL_BASED_SURFACE_MODEL('Crest',(#61));\n";
+    t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += "#80=MANIFOLD_SURFACE_SHAPE_REPRESENTATION('',(#62),#70);\n";
+    t += TAIL;
+    let imp = step_import(&t).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let b = &imp.bodies[0];
+    assert!(b.refused.is_none() && !b.body.is_mesh() && b.body.face_count() == 1, "{:?} {:?}", b.refused, imp.warnings);
+    // The band less the groove: its full height while the lower edge runs, then down to nothing.
+    let want = TAU * r * rim - r * gap * (a_end + b_end) / 2.0;
+    let area = measure(&b.body).unwrap().area;
+    assert!(rel(area, want) < 1e-4, "area {area} vs {want}");
+    // Drawn as itself at every display refinement, with no face filled leniently.
+    for chord in [0.04, 0.01, 0.0025] {
+        let (_, stats) = crate::tess::plan(b.body.record(), chord, None).unwrap();
+        assert!(stats.lenient.is_empty() && stats.unmeshed.is_empty(), "at {chord}: {stats:?}");
+        let m = b.body.mesh_of(&b.body.mesh_plan(&crate::MeshTolerance { chord, angle: Some(crate::DISPLAY_ANGLE) }).unwrap()).unwrap();
+        let drawn: f64 = m
+            .triangles
+            .iter()
+            .map(|t| {
+                let [p, q, s] = t.map(|i| m.positions[i as usize]);
+                0.5 * (q - p).cross(s - p).len()
+            })
+            .sum();
+        // Flat facets fall short of the cylinder by about two thirds of the chord over the radius.
+        assert!(rel(drawn, want) < chord / r, "at {chord}: drawn {drawn} vs {want}");
+    }
+}
+
 /// A round all the way round a part (a quarter of a torus's tube, between its outer equator and
 /// its top) bounded by its two circles alone, with no seam edge, comes in with a seam along its
 /// tube and its exact area, 2 pi r (R pi/2 + r). It was refused ("a face winding around a torus
