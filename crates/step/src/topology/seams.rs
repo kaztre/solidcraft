@@ -4,7 +4,9 @@
 //! apex); schema 4 keeps every loop closed in the surface's (u, v), so such a face gets a seam:
 //! a ruling line on a cylinder or cone, a meridian arc on a sphere, from a vertex of one loop to
 //! the other loop (split there when it has no vertex at that angle) or to the pole the face
-//! covers; on a surface of revolution, its profile turned to the vertex's angle. The loops merge into one: the first, the seam out, the second (or nothing at a pole),
+//! covers; on a surface of revolution, its profile turned to the vertex's angle. A seam between
+//! two loops runs from a vertex whose ruling meets the other loop before any edge, so it crosses
+//! none (a thread's crest has its groove's edges at every angle all the way down). The loops merge into one: the first, the seam out, the second (or nothing at a pole),
 //! the seam back. A face on a B-spline surface that closes on itself around u (its first and
 //! last control columns the same) gets a seam the same way, along the surface's own boundary
 //! column (u at the start of its knots), the loops split there where they have no vertex on it;
@@ -67,6 +69,13 @@ struct Axis {
     poles: [Option<Vec3>; 2],
     /// The period around (2π, or a closed spline's knot width).
     period: f64,
+}
+
+/// What a ruling meets on a bound: a vertex, or an edge at a parameter inside it.
+#[derive(Clone, Copy)]
+enum Hit {
+    Vertex(u32),
+    Cross(u32, f64),
 }
 
 #[derive(Clone, PartialEq)]
@@ -987,44 +996,77 @@ impl Builder<'_, '_> {
             }
             return self.join_by_seam(fi, la, lb, i, j, ax, eval);
         }
+        // Off a torus (round whose tube a seam runs one way), the ruling or meridian through a
+        // vertex is a seam only up to the first bound it meets, and only when that is the other
+        // loop: a thread's crest, a cylinder from its rim down to where its groove starts and on
+        // round the turns between, has the groove's edges at every angle all the way down, and a
+        // seam from the rim to the groove's far end crossed them all.
+        let tube = matches!(ax.kind, Kind::Tube(_));
+        let v_of = |s: &Self, x: u32| -> R<f64> { Ok(eval.project(s.vpoint(x)?, None, f64::INFINITY).ok_or("a vertex off its surface")?[1]) };
+        let clear = |s: &Self, va: u32, vb: u32| -> R<bool> {
+            if tube {
+                return Ok(true);
+            }
+            let dv = v_of(s, vb)? - v_of(s, va)?;
+            let hits = s.ruling_hits(fi, &[la, lb], va, ax, eval)?;
+            Ok(!hits.iter().any(|h| h.0 * dv > 0.0 && h.0.abs() > 1e-3 * dv.abs() && h.0.abs() < dv.abs() * (1.0 - 1e-3)))
+        };
         let mut pair = None;
         'search: for (i, ua) in a_es.iter().enumerate().take(100) {
             for (j, ub) in b_es.iter().enumerate().take(100) {
-                if close(self, self.start(*ua)?, self.start(*ub)?)? {
+                let (va, vb) = (self.start(*ua)?, self.start(*ub)?);
+                if close(self, va, vb)? && clear(self, va, vb)? {
                     pair = Some((i, j));
                     break 'search;
                 }
             }
         }
-        let (i, j) = match pair {
-            Some(p) => p,
-            None => {
-                // Split loop B where the ruling (or meridian) through A's first vertex meets it.
-                *splits += 1;
-                if *splits > MAX_SPLITS {
-                    return Err(format!("more than {MAX_SPLITS} edges split for seams"));
+        if let Some((i, j)) = pair {
+            return self.join_by_seam(fi, la, lb, i, j, ax, eval);
+        }
+        *splits += 1;
+        if *splits > MAX_SPLITS {
+            return Err(format!("more than {MAX_SPLITS} edges split for seams"));
+        }
+        if tube {
+            // Split loop B where the tube's circle through A's first vertex meets it.
+            let target = angle(self, self.start(*a_es.first().ok_or("empty loop")?)?)?;
+            let mut found = None;
+            for &(e, _) in &b_es {
+                if let Some(t) = self.crossing(e, target, ax.period, eval)? {
+                    found = Some((e, t));
+                    break;
                 }
-                let target = angle(self, self.start(*a_es.first().ok_or("empty loop")?)?)?;
-                let mut found = None;
-                for &(e, _) in &b_es {
-                    if let Some(t) = self.crossing(e, target, ax.period, eval)? {
-                        found = Some((e, t));
-                        break;
-                    }
-                }
-                let (e, t) = found.ok_or_else(|| unsupported("a band whose bounds share no angle"))?;
-                let v = self.split_edge(e, t)?;
-                let Some(LoopB::Edges(b_now)) = self.faces.get(fi).and_then(|f| f.loops.get(lb)) else { return Err("loop reference".into()) };
-                let mut j = None;
-                for (k, u) in b_now.iter().enumerate() {
-                    if self.start(*u)? == v {
-                        j = Some(k);
-                        break;
-                    }
-                }
-                (0, j.ok_or("the split vertex is not on its loop")?)
             }
+            let (e, t) = found.ok_or_else(|| unsupported("a band whose bounds share no angle"))?;
+            let v = self.split_edge(e, t)?;
+            let j = self.use_from(fi, lb, v)?;
+            return self.join_by_seam(fi, la, lb, 0, j, ax, eval);
+        }
+        // From a vertex of either loop, the nearest bound along its ruling either way that is the
+        // other loop, split there.
+        let mut chosen = None;
+        'from: for (from, other) in [(la, lb), (lb, la)] {
+            let Some(LoopB::Edges(es)) = self.faces.get(fi).and_then(|f| f.loops.get(from)) else { return Err("loop reference".into()) };
+            let starts: Vec<u32> = es.iter().take(100).map(|u| self.start(*u)).collect::<R<_>>()?;
+            for at in starts {
+                let hits = self.ruling_hits(fi, &[la, lb], at, ax, eval)?;
+                let floor = 1e-9 * hits.iter().map(|h| h.0.abs()).fold(0.0, f64::max);
+                let up = hits.iter().filter(|h| h.0 > floor).min_by(|x, y| x.0.total_cmp(&y.0));
+                let down = hits.iter().filter(|h| h.0 < -floor).max_by(|x, y| x.0.total_cmp(&y.0));
+                if let Some(h) = [up, down].into_iter().flatten().filter(|h| h.1 == other).min_by(|x, y| x.0.abs().total_cmp(&y.0.abs())) {
+                    chosen = Some((from, at, h.2));
+                    break 'from;
+                }
+            }
+        }
+        let (from, at, hit) = chosen.ok_or_else(|| unsupported("a band whose bounds share no angle"))?;
+        let w = match hit {
+            Hit::Vertex(w) => w,
+            Hit::Cross(e, t) => self.split_edge(e, t)?,
         };
+        let (va, vb) = if from == la { (at, w) } else { (w, at) };
+        let (i, j) = (self.use_from(fi, la, va)?, self.use_from(fi, lb, vb)?);
         self.join_by_seam(fi, la, lb, i, j, ax, eval)
     }
 
@@ -1049,16 +1091,25 @@ impl Builder<'_, '_> {
         Ok(())
     }
 
-    /// The parameter inside edge `e`'s interval where its curve reaches the angle `target`
+    /// The parameter inside edge `e`'s interval where its curve first reaches the angle `target`
     /// about the axis, if it does.
     fn crossing(&self, e: u32, target: f64, period: f64, eval: &SurfaceEval) -> R<Option<f64>> {
+        Ok(self.crossings(e, target, period, eval)?.first().copied())
+    }
+
+    /// Every parameter inside edge `e`'s interval where its curve reaches the angle `target`
+    /// about the axis, in order: a helix reaches it once a turn.
+    fn crossings(&self, e: u32, target: f64, period: f64, eval: &SurfaceEval) -> R<Vec<f64>> {
         let edge = self.edges.get(e as usize).ok_or("edge reference")?;
         let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
         let [lo, hi] = edge.interval;
         let d = |t: f64| c.point(t).and_then(|p| eval.project(p, None, f64::INFINITY)).map(|q| wrap_by(q[0] - target, period));
         // A jump across the half period is the wrap, not a crossing.
         let near = period / TAU;
-        let n = 64;
+        // Enough samples for a few each turn of a long helix.
+        let n = (64.0 * self.turns(e, period, eval)?.max(1.0)).min(4096.0) as usize;
+        let eps = 1e-9 * (hi - lo);
+        let mut found = Vec::new();
         let mut prev: Option<(f64, f64)> = None;
         for k in 0..=n {
             let t = lo + (hi - lo) * k as f64 / n as f64;
@@ -1080,12 +1131,82 @@ impl Builder<'_, '_> {
                     }
                 }
                 let t = 0.5 * (a + b);
-                let eps = 1e-9 * (hi - lo);
-                return Ok((t > lo + eps && t < hi - eps).then_some(t));
+                if t > lo + eps && t < hi - eps {
+                    found.push(t);
+                }
             }
             prev = Some((t, x));
         }
-        Ok(None)
+        Ok(found)
+    }
+
+    /// How many turns about the axis edge `e` makes, from a coarse walk along it.
+    fn turns(&self, e: u32, period: f64, eval: &SurfaceEval) -> R<f64> {
+        let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+        let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
+        let [lo, hi] = edge.interval;
+        let mut last: Option<[f64; 2]> = None;
+        let mut total = 0.0;
+        for k in 0..=SAMPLES {
+            let p = c.point(lo + (hi - lo) * k as f64 / SAMPLES as f64).ok_or("edge point")?;
+            let Some(q) = eval.project(p, last, f64::INFINITY) else { continue };
+            if let Some(l) = last {
+                total += wrap_by(q[0] - l[0], period).abs();
+            }
+            last = Some(q);
+        }
+        Ok(total / period)
+    }
+
+    /// Where the ruling (or meridian) through vertex `at` meets loops `loops` of face `fi`: each
+    /// meeting's signed distance in v from `at`, its loop, and the vertex it is or the edge it
+    /// crosses.
+    fn ruling_hits(&self, fi: usize, loops: &[usize], at: u32, ax: &Axis, eval: &SurfaceEval) -> R<Vec<(f64, usize, Hit)>> {
+        let p = self.vpoint(at)?;
+        let q0 = eval.project(p, None, f64::INFINITY).ok_or("a vertex off its surface")?;
+        let r = {
+            let d = p - ax.origin;
+            (d - ax.z * d.dot(ax.z)).len()
+        };
+        // An edge from `at` that grazes its angle again as it leaves (a spline a few nm off the
+        // ruling) does not bound the seam; another loop's edge that close does.
+        let near = (10.0 * self.tol).max(2.0 * self.vertices.get(at as usize).map_or(0.0, |x| x.tolerance)).max(1e-4);
+        let face = self.faces.get(fi).ok_or("face reference")?;
+        let mut hits = Vec::new();
+        for &li in loops {
+            let Some(LoopB::Edges(es)) = face.loops.get(li) else { continue };
+            for &(e, forward) in es {
+                let v = self.start((e, forward))?;
+                if v != at
+                    && let Some(q) = eval.project(self.vpoint(v)?, None, f64::INFINITY)
+                    && wrap_by(q[0] - q0[0], ax.period).abs() * r <= self.tol
+                {
+                    hits.push((q[1] - q0[1], li, Hit::Vertex(v)));
+                }
+                let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
+                for t in self.crossings(e, q0[0], ax.period, eval)? {
+                    let Some(x) = c.point(t) else { continue };
+                    if (!edge.vertices.contains(&at) || x.dist(p) > near)
+                        && let Some(q) = eval.project(x, None, f64::INFINITY)
+                    {
+                        hits.push((q[1] - q0[1], li, Hit::Cross(e, t)));
+                    }
+                }
+            }
+        }
+        Ok(hits)
+    }
+
+    /// The use of loop `li` of face `fi` that starts at vertex `v`.
+    fn use_from(&self, fi: usize, li: usize, v: u32) -> R<usize> {
+        let Some(LoopB::Edges(es)) = self.faces.get(fi).and_then(|f| f.loops.get(li)) else { return Err("loop reference".into()) };
+        for (k, u) in es.iter().enumerate() {
+            if self.start(*u)? == v {
+                return Ok(k);
+            }
+        }
+        Err("the seam's vertex is not on its loop".into())
     }
 
     /// The use of loop `li` of face `fi` that starts on the surface's column at u = `u0`: a
