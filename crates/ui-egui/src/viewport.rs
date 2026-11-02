@@ -4253,6 +4253,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && !crate::sketch_text_handles::dragging(app)
         {
             let active = app.session.active_sketch;
+            let hit = hit.map(|hit| point_at_midpoint(app, hit));
             match hit {
                 Some(Hit::SketchPoint { sketch, id, .. }) if Some(sketch) == active => {
                     // A point dragged with the rest of a selection slides with it, from where it
@@ -4827,6 +4828,27 @@ pub(crate) fn select(app: &mut SolveApp, sel: Option<Sel>, add: bool, toggle: bo
 
 /// The rest of the selected sketch geometry when the point or curve `id` is part of it (#2621):
 /// a drag that starts on a selected entity moves the whole selection with it.
+/// A drag that starts on a line's middle where a point is held (a centre rectangle's centre on
+/// its diagonal) drags that point, as a drag that starts on the point does. Dragging the line by
+/// its middle instead moved its ends: with the point constrained (on the origin, on a line) the
+/// line turned and stretched about it, and the rectangle round it changed size (#10510).
+fn point_at_midpoint(app: &SolveApp, hit: Hit) -> Hit {
+    let Hit::SketchMidpoint { sketch, id, .. } = &hit else { return hit };
+    let Ok(st) = app.session.world_state() else { return hit };
+    let held = st.sketch(*sketch).and_then(|ss| {
+        let sk = &ss.sketch;
+        let line = sk.curve_index(id)?;
+        sk.constraints.iter().filter(|c| !c.driven).find_map(|c| match c.kind {
+            solidcraft_engine::sketch::ConstraintKind::Midpoint { p, l } if l == line => sk.points.get(p).map(|q| (q.id.clone(), q.pos)),
+            _ => None,
+        })
+    });
+    match held {
+        Some((id, at)) => Hit::SketchPoint { sketch: *sketch, id, at },
+        None => hit,
+    }
+}
+
 fn dragged_with(app: &SolveApp, id: &str) -> Vec<String> {
     fn geometry(s: &Sel) -> Option<&str> {
         match s {
