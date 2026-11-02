@@ -241,12 +241,19 @@ impl Builder<'_, '_> {
             let ends = members.iter().filter_map(|(_, sign, e)| e.map(|e| sign * e[0][1]));
             let Some(phi) = starts(false).chain(starts(true)).chain(ends).find(|phi| fits(*phi)) else {
                 // No one turn fits them all (a thread's run-out on a chamfer, beside the coaxial
-                // faces it meets): each face of less than a turn that spills is turned on its own
-                // to start on a quarter line; left as it was, its form covered its surface twice
-                // and no kernel took it. A whole turn keeps its group's grid, which its seam and
-                // the circles it shares are labelled on.
+                // faces it meets): each face that spills is turned on its own to start on a quarter
+                // line; left as it was, its form covered its surface twice and no kernel took it.
+                // A whole turn too, from its seam, where none of its edges is a whole circle: kept on
+                // its group's grid, its form ran a quarter past its seam and its pcurves the wrong
+                // way round (a Cobalt 14 connector's chamfer, notched by its key slot, came in as
+                // surfaces). A whole circle stays on its group's grid, where it starts at its
+                // vertex; on a grid of its own the face's seam would cut it part way round.
                 for &(fi, _, e) in &members {
-                    let Some(e) = e.filter(|e| spilling(&fi) && e[0][1] - e[0][0] < TAU * (1.0 - 1e-9)) else { continue };
+                    let whole = e.is_some_and(|e| e[0][1] - e[0][0] >= TAU * (1.0 - 1e-9));
+                    if whole && self.has_whole_circle(fi) {
+                        continue;
+                    }
+                    let Some(e) = e.filter(|_| spilling(&fi)) else { continue };
                     let angle = e[0][0];
                     let Some(face) = self.faces.get(fi) else { continue };
                     if quarters_turned(&face.surface, e, angle, self.tol).is_none_or(|q| q > 4) {
@@ -274,5 +281,17 @@ impl Builder<'_, '_> {
             }
         }
         Ok(turned)
+    }
+}
+
+impl Builder<'_, '_> {
+    /// Whether a loop of face `fi` uses an edge closed on itself (one vertex at both ends).
+    fn has_whole_circle(&self, fi: usize) -> bool {
+        self.faces.get(fi).is_some_and(|f| {
+            f.loops.iter().any(|l| match l {
+                LoopB::Edges(es) => es.iter().any(|(e, _)| self.edges.get(*e as usize).is_some_and(|x| x.vertices[0] == x.vertices[1])),
+                LoopB::Vertex(_) => false,
+            })
+        })
     }
 }

@@ -30,6 +30,51 @@ impl Curve2 {
         Some([*k.get(degree)?, *k.get(count)?])
     }
 
+    /// The cubic through `points` at the increasing parameters `params` (at least two), one span
+    /// between each two, with the tangents `tangents` gives each point from before it and after
+    /// it: joined tangent (a double knot) where the two agree, else only joined (a triple knot), so
+    /// a chain of cubic pieces comes back exactly from its ends' points and tangents. `None` for
+    /// mismatched or non-increasing input.
+    pub fn hermite(params: &[f64], points: &[[f64; 2]], tangents: &[[[f64; 2]; 2]]) -> Option<Curve2> {
+        if params.len() < 2
+            || points.len() != params.len()
+            || tangents.len() != params.len()
+            || params.windows(2).any(|w| !matches!((w.first(), w.get(1)), (Some(a), Some(b)) if a < b))
+        {
+            return None;
+        }
+        let (&a, &b) = (params.first()?, params.last()?);
+        let mut knots = vec![a; 4];
+        let mut out = Vec::with_capacity(3 * params.len());
+        out.push(*points.first()?);
+        let at = |p: [f64; 2], d: [f64; 2], by: f64| [p[0] + d[0] * by, p[1] + d[1] * by];
+        for k in 0..params.len() - 1 {
+            let (t0, t1) = (*params.get(k)?, *params.get(k + 1)?);
+            let (p0, p1) = (*points.get(k)?, *points.get(k + 1)?);
+            let ([_, d0], [d1, after]) = (*tangents.get(k)?, *tangents.get(k + 1)?);
+            let third = (t1 - t0) / 3.0;
+            out.push(at(p0, d0, third));
+            if k + 2 == params.len() {
+                out.push(at(p1, d1, -third));
+                break;
+            }
+            let size = d1[0].hypot(d1[1]).max(after[0].hypot(after[1]));
+            if (d1[0] - after[0]).hypot(d1[1] - after[1]) <= 1e-6 * size {
+                // One tangent both sides, so the double knot's neighbours and the point line up.
+                let d = [0.5 * (d1[0] + after[0]), 0.5 * (d1[1] + after[1])];
+                out.push(at(p1, d, -third));
+                knots.extend([t1, t1]);
+            } else {
+                out.push(at(p1, d1, -third));
+                out.push(p1);
+                knots.extend([t1, t1, t1]);
+            }
+        }
+        out.push(*points.last()?);
+        knots.extend([b; 4]);
+        Some(Curve2::Spline { knots, points: out })
+    }
+
     /// The point at `t` (`None` outside the interval or for a malformed record).
     pub fn eval(&self, t: f64) -> Option<[f64; 2]> {
         let (knots, h): (&[f64], Vec<[f64; 3]>) = match self {

@@ -45,7 +45,7 @@ use solidcraft_geom::brep::{
     Surface as BSurface, Vertex,
 };
 
-use crate::geom::{BSplineCurve, BSplineSurface, Curve, P3, Placement, dot, scale, sub};
+use crate::geom::{BSplineCurve, BSplineSurface, Curve, P3, Placement, Surface, dot, scale, sub};
 use crate::p21::{Entity, Exchange, Param};
 use crate::read::{R, Reader};
 use crate::units;
@@ -580,8 +580,7 @@ impl<'b, 'a> Builder<'b, 'a> {
             return Err(format!("#{id}: {}", unsupported(format!("vertex {}", e.name()))));
         }
         let point = self.reader.point(rid(e.params().get(1), "vertex point")?)?;
-        let i = index(self.vertices.len())?;
-        self.vertices.push(Vertex { point, tolerance: self.tol });
+        let i = self.new_vertex(point)?;
         self.vertex_ids.insert(id, i);
         Ok(i)
     }
@@ -715,13 +714,21 @@ impl<'b, 'a> Builder<'b, 'a> {
         let (vs, ve) = (self.vertex(vs_id)?, self.vertex(ve_id)?);
         let same_sense = flag(p.get(4), "edge same_sense")?;
         let curve = self.edge_geometry(rid(p.get(3), "edge geometry")?, 0)?;
+        let e = self.add_edge(&curve, [vs, ve], same_sense, id)?;
+        self.edge_ids.insert(id, e);
+        Ok(e)
+    }
+
+    /// A schema edge on `curve` between `vs` and `ve` (entity `id` names it in messages), and
+    /// whether it runs from `vs` to `ve`.
+    fn add_edge(&mut self, curve: &Curve, [vs, ve]: [u32; 2], same_sense: bool, id: u64) -> R<(u32, bool)> {
         let (ps, pe) = (self.point(vs)?, self.point(ve)?);
         let closed = vs == ve;
         // A full turn when the edge has one vertex, or two at one point. Two vertices apart bound
         // the arc between them, however short: a 20.4 um arc between vertices a 20.5 um uncertainty
         // does not tell apart is that arc, not a turn around its face.
         let full = closed || ps == pe;
-        let mapped = map_edge(&curve, ps, pe, same_sense, closed, full, self.tol).map_err(|m| format!("edge #{id}: {m}"))?;
+        let mapped = map_edge(curve, ps, pe, same_sense, closed, full, self.tol).map_err(|m| format!("edge #{id}: {m}"))?;
         if mapped.sense_mismatch {
             self.sense_mismatches += 1;
         }
@@ -735,8 +742,48 @@ impl<'b, 'a> Builder<'b, 'a> {
         }
         let i = index(self.edges.len())?;
         self.edges.push(EdgeB { curve: mapped.curve, interval: mapped.interval, vertices, tolerance: self.tol, form: None });
-        self.edge_ids.insert(id, (i, mapped.with_step));
         Ok((i, mapped.with_step))
+    }
+
+    /// The edge loop that bounds the whole of a face's surface when the face has no bounds (an
+    /// O-ring written as one torus face): the loop SolidCraft writes for such a face, relative to
+    /// the STEP surface's normal. A ring torus is bounded by its meridian at angle zero and its
+    /// outer parallel, both through one vertex; a sphere by a meridian from pole to pole. `None`
+    /// for any other surface. Face `id` names the new edges in messages.
+    fn whole_surface(&mut self, surface: &Surface, id: u64) -> R<Option<LoopB>> {
+        // About -Y from X: cos t·X + sin t·Z, the angle a torus or sphere measures up from X.
+        let meridian = |p: &Placement, origin: P3, radius: f64| Curve::Circle {
+            position: Placement { origin, axis: scale(p.y(), -1.0), ref_direction: p.ref_direction },
+            radius,
+        };
+        match surface {
+            Surface::Torus { position: p, major_radius: big, minor_radius: r } => {
+                // A ring torus only: a spindle torus has no one solid inside it.
+                if !(*r > 0.0 && *big > *r) {
+                    return Ok(None);
+                }
+                let v = self.new_vertex(p.at(big + r, 0.0, 0.0))?;
+                let m = self.add_edge(&meridian(p, p.at(*big, 0.0, 0.0), *r), [v, v], true, id)?.0;
+                let q = self.add_edge(&Curve::Circle { position: *p, radius: big + r }, [v, v], true, id)?.0;
+                Ok(Some(LoopB::Edges(vec![(m, false), (q, true), (m, true), (q, false)])))
+            }
+            Surface::Sphere { position: p, radius: r } => {
+                if !(*r > 0.0) {
+                    return Ok(None);
+                }
+                let (s, n) = (self.new_vertex(p.at(0.0, 0.0, -r))?, self.new_vertex(p.at(0.0, 0.0, *r))?);
+                let (e, forward) = self.add_edge(&meridian(p, p.origin, *r), [s, n], true, id)?;
+                Ok(Some(LoopB::Edges(vec![(e, !forward), (e, forward)])))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// A vertex of the record's own, at `point`.
+    fn new_vertex(&mut self, point: P3) -> R<u32> {
+        let i = index(self.vertices.len())?;
+        self.vertices.push(Vertex { point, tolerance: self.tol });
+        Ok(i)
     }
 
     /// An edge's curve: SURFACE_CURVE and its subtypes by their 3D curve, TRIMMED_CURVE by its
@@ -878,7 +925,13 @@ impl<'b, 'a> Builder<'b, 'a> {
             loops.push(l);
         }
         if !loops.iter().any(|l| matches!(l, LoopB::Edges(_))) {
-            return Err(format!("face #{id}: {}", unsupported("a face without an edge loop")));
+            match (loops.is_empty(), self.whole_surface(&step_surface, id).map_err(|m| format!("face #{id}: {m}"))?) {
+                (true, Some(whole)) => {
+                    loops.push(whole);
+                    outer = Some(0);
+                }
+                _ => return Err(format!("face #{id}: {}", unsupported("a face without an edge loop"))),
+            }
         }
         let extent = self.extent(&loops)?;
         let (surface, reversed) = swept::map_surface(&step_surface, &extent, self.tol).map_err(|m| format!("face #{id}: {m}"))?;
@@ -1566,13 +1619,17 @@ impl Builder<'_, '_> {
 
     /// The pcurve on a helical face's form of edge `e` (a helix round its cylinder or cone, with
     /// no closed form), whose curve starts at angle `start` about the axis as its loop reaches it:
-    /// the curve's angle unwrapped along it and its height, through points along it at the edge's
-    /// parameters. A kernel projecting onto a form of several turns may settle on any turn at
-    /// each point; the walk stays on the one the loop is on.
+    /// the curve's angle unwrapped along it and its height, through points along it and their
+    /// tangents ([`Curve2::hermite`]). A kernel projecting onto a form of several turns may settle
+    /// on any turn at each point; the walk stays on the one the loop is on. The points are the
+    /// curve's own knots, where its pace changes, and enough a quarter turn: evenly spaced alone,
+    /// they missed how a helix of 718 uneven spans speeds and slows between them, and its pcurve
+    /// strayed 0.1 mm off it (a Cobalt connector's thread, drawn torn when zoomed in).
     fn helix_pcurve(&self, label: &BSurface, e: u32, start: f64) -> R<Curve2> {
-        // Points per quarter turn, and the most along one edge (the interpolation is dense).
+        // Points per quarter turn, and the most spans along one edge (two control points each, or
+        // three where it turns, within the schema's 4096).
         const PER_QUARTER: f64 = 16.0;
-        const MAX_POINTS: usize = 640;
+        const MAX_SPANS: usize = 2000;
         let on = SurfaceEval::new(label).map_err(|m| m.to_string())?;
         let edge = self.edges.get(e as usize).ok_or("edge reference")?;
         // On the curve and interval its use is given on (`uses_of`): an arc's NURBS form.
@@ -1581,33 +1638,81 @@ impl Builder<'_, '_> {
             None => (&edge.curve, edge.interval),
         };
         let eval = CurveEval::new(curve).map_err(|m| m.to_string())?;
-        let walk = |n: usize| -> R<Vec<(f64, [f64; 2])>> {
-            let mut out: Vec<(f64, [f64; 2])> = Vec::with_capacity(n + 1);
-            for k in 0..=n {
-                let t = if k == n { t1 } else { t0 + (t1 - t0) * (k as f64 / n as f64) };
-                let p = eval.point(t).ok_or("edge point")?;
-                let near = out.last().map(|(_, q)| *q);
-                let mut q = on.project(p, near, f64::INFINITY).ok_or("a helix point off its face's surface")?;
-                if let Some(r) = near {
-                    q[0] += ((r[0] - q[0]) / TAU).round() * TAU;
-                }
-                out.push((t, q));
+        let project = |t: f64, near: Option<[f64; 2]>| -> R<[f64; 2]> {
+            let p = eval.point(t).ok_or("edge point")?;
+            let mut q = on.project(p, near, f64::INFINITY).ok_or("a helix point off its face's surface")?;
+            if let Some(r) = near {
+                q[0] += ((r[0] - q[0]) / TAU).round() * TAU;
+            }
+            Ok(q)
+        };
+        let walk = |ts: &[f64]| -> R<Vec<[f64; 2]>> {
+            let mut out: Vec<[f64; 2]> = Vec::with_capacity(ts.len());
+            for &t in ts {
+                let q = project(t, out.last().copied())?;
+                out.push(q);
             }
             Ok(out)
         };
-        // A first pass finds how many turns the edge makes, the second samples it that densely.
-        let rough = walk(512)?;
+        let even = |n: usize| -> Vec<f64> { (0..=n).map(|k| if k == n { t1 } else { t0 + (t1 - t0) * (k as f64 / n as f64) }).collect() };
+        // A first pass finds how many turns the edge makes.
+        let rough = walk(&even(512))?;
         let turned = match (rough.first(), rough.last()) {
-            (Some((_, a)), Some((_, b))) => (b[0] - a[0]).abs(),
+            (Some(a), Some(b)) => (b[0] - a[0]).abs(),
             _ => 0.0,
         };
-        let n = ((turned / std::f64::consts::FRAC_PI_2 * PER_QUARTER).ceil() as usize).clamp(16, MAX_POINTS);
-        let points = walk(n)?;
-        let shift = points.first().map_or(0.0, |(_, q)| ((start - q[0]) / TAU).round() * TAU);
-        let params: Vec<f64> = points.iter().map(|(t, _)| *t).collect();
-        let uv: Vec<[f64; 2]> = points.iter().map(|(_, q)| [brep::form::param(q[0] + shift), q[1]]).collect();
-        let c = solidcraft_geom::bspline::CurveN::<2>::interpolate(&params, &uv, 3).map_err(|m| m.to_string())?;
-        Ok(Curve2::Spline { knots: c.knots, points: c.ctrl })
+        let n = ((turned / std::f64::consts::FRAC_PI_2 * PER_QUARTER).ceil() as usize).clamp(16, MAX_SPANS);
+        let own: &[f64] = match curve {
+            BCurve::Spline { knots, .. } | BCurve::RationalSpline { knots, .. } => knots,
+            _ => &[],
+        };
+        let gap = 1e-9 * (t1 - t0);
+        let sorted = |mut ts: Vec<f64>| {
+            ts.sort_by(f64::total_cmp);
+            ts.dedup_by(|later, earlier| *later - *earlier <= gap);
+            ts
+        };
+        let knots = sorted([t0, t1].into_iter().chain(own.iter().copied().filter(|t| *t > t0 + gap && *t < t1 - gap)).collect());
+        // The curve's own knots before the even ones: those near a knot, and all where both are
+        // too many.
+        let near_knot = |t: f64| {
+            let i = knots.partition_point(|k| *k < t);
+            [i.checked_sub(1), Some(i)].into_iter().flatten().filter_map(|i| knots.get(i)).any(|k| (k - t).abs() <= 1e-6 * (t1 - t0))
+        };
+        let mut ts = sorted(even(n).into_iter().filter(|t| !near_knot(*t)).chain(knots.iter().copied()).collect());
+        if ts.len() > MAX_SPANS + 1 {
+            ts = knots;
+        }
+        loop {
+            let points = walk(&ts)?;
+            let shift = points.first().map_or(0.0, |q| ((start - q[0]) / TAU).round() * TAU);
+            let uv = |q: [f64; 2]| [brep::form::param(q[0] + shift), q[1]];
+            // Each point's tangents from before it and after it, along the curve on the same turn
+            // (a knot may join its pieces with a turn), by second-order one-sided differences.
+            let h = 1e-7 * (t1 - t0);
+            let side = |t: f64, q: [f64; 2], s: f64| -> R<[f64; 2]> {
+                let (p0, p1, p2) = (uv(q), uv(project(t + s * h, Some(q))?), uv(project(t + 2.0 * s * h, Some(q))?));
+                Ok([0, 1].map(|d| s * (4.0 * p1[d] - 3.0 * p0[d] - p2[d]) / (2.0 * h)))
+            };
+            let mut tangents = Vec::with_capacity(ts.len());
+            for (&t, &q) in ts.iter().zip(&points) {
+                let before = side(t, q, if t > t0 { -1.0 } else { 1.0 })?;
+                let after = if t < t1 { side(t, q, 1.0)? } else { before };
+                tangents.push([before, after]);
+            }
+            let uvs: Vec<[f64; 2]> = points.into_iter().map(uv).collect();
+            let c = Curve2::hermite(&ts, &uvs, &tangents).ok_or_else(|| "a helix pcurve through no points".to_string())?;
+            let size = match &c {
+                Curve2::Spline { points, .. } => points.len(),
+                Curve2::RationalSpline { homogeneous, .. } => homogeneous.len(),
+            };
+            // Within the schema's 4096 control points: every other point, ends kept, until it is.
+            if size <= 4096 || ts.len() <= 2 {
+                return Ok(c);
+            }
+            let last = ts.len() - 1;
+            ts = ts.iter().enumerate().filter(|(k, _)| k % 2 == 0 || *k == last).map(|(_, t)| *t).collect();
+        }
     }
 
     /// The face as a kernel takes it to make its missing pcurves: its edges and vertices
