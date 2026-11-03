@@ -889,6 +889,15 @@ impl Drop for DriverClient {
 fn main() -> eframe::Result {
     #[cfg(target_os = "macos")]
     objc2_foundation::NSProcessInfo::processInfo().setProcessName(objc2_foundation::ns_string!("SolidCraft"));
+    // A helper process (solidcraft_engine::helper): no window, settings, journal or crash marker;
+    // it runs the work it is sent and exits.
+    #[cfg(not(target_arch = "wasm32"))]
+    if std::env::args().nth(1).as_deref() == Some(solidcraft_engine::helper::ARG) {
+        solidcraft_ui_egui::gpu::install_headless_picture_renderer();
+        std::process::exit(solidcraft_engine::helper::serve());
+    }
+    // The app's own reads of files it did not make go to helpers.
+    solidcraft_engine::helper::enable();
     mark("main");
     // On OCLP-patched Macs, wgpu picks a Metal Shading Language standard that the system's
     // compiler refuses (`invalid value 'metal3.2'`), because the patched OS reports a newer

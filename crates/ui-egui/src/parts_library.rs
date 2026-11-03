@@ -174,7 +174,7 @@ impl Pictures {
                     if stop.load(Ordering::Relaxed) {
                         break;
                     }
-                    let picture = make_picture(&r);
+                    let picture = make_picture(&r, &stop);
                     if done.send((r.file, picture)).is_err() {
                         break;
                     }
@@ -205,7 +205,7 @@ impl Pictures {
 }
 
 /// A part's picture: a design's own, or a CAD file's, drawn once and cached on this computer.
-fn make_picture(r: &PictureRequest) -> Option<egui::ColorImage> {
+fn make_picture(r: &PictureRequest, stop: &AtomicBool) -> Option<egui::ColorImage> {
     match r.kind {
         Kind::Design => crate::home::decode_thumbnail(solidcraft_engine::io::read_design_thumbnail_file(&r.file)?),
         Kind::Cad => {
@@ -216,11 +216,30 @@ fn make_picture(r: &PictureRequest) -> Option<egui::ColorImage> {
             if !r.asked && (!r.local || r.bytes > AUTO_PICTURE_BYTES) {
                 return None;
             }
-            let mut s = solidcraft_engine::Session::default();
-            s.execute("doc.open", &json!({"path": r.file})).ok()?;
+            let s = open_cad(&r.file, stop)?;
             crate::home::remember_file(&s, &r.file)
         }
     }
+}
+
+/// A session holding the CAD file `file`, read by a helper process (`solidcraft_engine::helper`):
+/// the helper saves what it read as a design, and this process opens that, so a file that crashes
+/// the geometry kernel fails only its picture. Without helpers it is read here.
+fn open_cad(file: &str, stop: &AtomicBool) -> Option<solidcraft_engine::Session> {
+    use std::sync::atomic::AtomicU64;
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let read = std::env::temp_dir().join(format!(
+        "solidcraft-part-picture-{}-{}.{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed),
+        solidcraft_engine::io::DESIGN_EXT
+    ));
+    let read = read.to_str()?.to_string();
+    let saved = solidcraft_engine::helper::run(&[("doc.open", json!({"path": file})), ("file.save", json!({"path": read}))], stop);
+    let mut s = solidcraft_engine::Session::default();
+    let opened = saved.is_ok() && s.execute("doc.open", &json!({"path": read})).is_ok();
+    let _ = std::fs::remove_file(&read);
+    opened.then_some(s)
 }
 
 /// A part's library properties, guessed from its names for a conversion.
@@ -236,7 +255,7 @@ fn convert_params(entry: &Entry, file: &str, stand_up: bool) -> Value {
 struct Inserting {
     name: String,
     file: String,
-    rx: Receiver<Result<String, String>>,
+    rx: Receiver<Result<String, solidcraft_engine::helper::Failure>>,
 }
 
 /// Converting a category's CAD parts.
@@ -422,10 +441,14 @@ fn insert(app: &mut SolveApp, w: &mut PartsLibrary, picked: &(usize, String)) {
         Kind::Cad => {
             let params = convert_params(entry, &file, app.preferences.parts_library_stand_up);
             let (tx, rx) = std::sync::mpsc::channel();
-            let started = w.workers.spawn("parts-library-convert", move |_| {
-                let r = solidcraft_engine::Session::default().execute("library.parts.convert", &params);
-                let _ =
-                    tx.send(r.map_err(|e| e.to_string()).and_then(|r| r["file"].as_str().map(str::to_string).ok_or_else(|| "no file".to_string())));
+            let started = w.workers.spawn("parts-library-convert", move |stop| {
+                let r = solidcraft_engine::helper::run(&[("library.parts.convert", params)], &stop);
+                let _ = tx.send(r.and_then(|r| {
+                    r["file"]
+                        .as_str()
+                        .map(str::to_string)
+                        .ok_or_else(|| solidcraft_engine::helper::Failure { message: "no file".into(), crashed: false })
+                }));
             });
             if started {
                 w.note = Some((format("ui.parts_library_preparing", &[("name", &name)]), false));
@@ -455,9 +478,13 @@ fn poll_insert(app: &mut SolveApp, w: &mut PartsLibrary) {
                 l.rescan(&w.workers);
             }
         }
+        // The file crashed the helper reading it: reading it here would close the window.
+        Err(e) if e.crashed => {
+            w.note = Some((format("ui.parts_library_not_read", &[("name", &job.name), ("reason", &e.message)]), true));
+        }
         Err(e) => {
             app.insert_path_async(&job.file);
-            w.note = Some((format("ui.parts_library_copied_instead", &[("name", &job.name), ("reason", &e)]), true));
+            w.note = Some((format("ui.parts_library_copied_instead", &[("name", &job.name), ("reason", &e.message)]), true));
         }
     }
 }
@@ -486,9 +513,9 @@ fn start_converting(w: &mut PartsLibrary, stand_up: bool) {
                 break;
             }
             let _ = tx.send(ConvertEvent::Started(name.clone()));
-            let event = match solidcraft_engine::Session::default().execute("library.parts.convert", &params) {
+            let event = match solidcraft_engine::helper::run(&[("library.parts.convert", params)], &quitting) {
                 Ok(_) => ConvertEvent::Converted,
-                Err(e) => ConvertEvent::Failed(name, e.to_string()),
+                Err(e) => ConvertEvent::Failed(name, e.message),
             };
             let _ = tx.send(event);
         }

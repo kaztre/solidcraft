@@ -1,0 +1,9 @@
+{
+  "en": { "ui.parts_library_not_read": "Couldn't read {name} ({reason}). Nothing was inserted." },
+  "de": { "ui.parts_library_not_read": "{name} konnte nicht gelesen werden ({reason}). Es wurde nichts eingefügt." },
+  "ja": { "ui.parts_library_not_read": "{name} を読み込めませんでした（{reason}）。何も挿入されていません。" },
+  "zh": { "ui.parts_library_not_read": "无法读取 {name}（{reason}）。未插入任何内容。" },
+  "ko": { "ui.parts_library_not_read": "{name}을(를) 읽을 수 없습니다({reason}). 아무것도 삽입되지 않았습니다." },
+  "ar": { "ui.parts_library_not_read": "تعذّرت قراءة {name} ({reason}). لم يُدرج أي شيء." },
+  "he": { "ui.parts_library_not_read": "לא ניתן היה לקרוא את {name} ({reason}). לא הוכנס דבר." }
+}

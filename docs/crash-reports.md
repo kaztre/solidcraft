@@ -158,6 +158,15 @@ A crash that ends the process without any exception (a fail-fast, which is how a
 Windows) still gets the startup step. Windows can also keep its own dumps of every crash: set
 `DumpFolder` under `HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps`.
 
+## Files read in a helper
+
+The Parts Library reads CAD files nobody has checked: converting them, inserting one, and drawing
+their pictures. The app does that work in a helper, a second copy of itself started with
+`--helper` (`solidcraft_engine::helper`). If the geometry kernel crashes on one file, only the
+helper ends. That file shows as not converted, with the reason, and the window and the open
+design stay up. Your system may still show its own notice that a SolidCraft process crashed.
+Inserting a file that crashed a helper inserts nothing, rather than reading it in the window.
+
 ## How it stays cheap and small
 
 - **Before a crash:** the app keeps a journal of the top-level commands run on the design on

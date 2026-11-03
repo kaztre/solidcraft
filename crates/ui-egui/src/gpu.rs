@@ -144,6 +144,17 @@ fn picture(
     }
 }
 
+/// Draw this process's headless pictures on a headless device of its own (the `SOLIDCRAFT_GPU`
+/// policy's, opened on the first picture), else the CPU rasterizer: for a helper process, which
+/// has no window (`solidcraft_engine::helper`).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn install_headless_picture_renderer() {
+    solidcraft_engine::capture::install(std::sync::Arc::new(|scene, cam, w, h| {
+        let (rgba, renderer) = solidcraft_gpu::capture::headless_rgba(scene, cam, w, h)?;
+        Ok(solidcraft_engine::capture::Picture { rgba, renderer })
+    }));
+}
+
 /// The last tier: draw this process's headless pictures with the CPU rasterizer, and every
 /// picture says so. The app uses it when its device cannot draw pictures; the web app always
 /// does, since a browser cannot wait for the GPU to hand a picture back.
