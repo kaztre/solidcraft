@@ -8,7 +8,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 #[test]
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<PartsSearchParams>(), &["folder", "limit", "query"]);
-    assert_keys(input_schema_for::<PartsConvertParams>(), &["description", "name", "organization", "overwrite", "part_number", "path", "stand_up"]);
+    assert_keys(input_schema_for::<PartsConvertParams>(), &["description", "name", "organization", "overwrite", "part_number", "path", "revision", "stand_up"]);
 }
 
 #[test]

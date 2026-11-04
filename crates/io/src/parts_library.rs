@@ -53,6 +53,10 @@ pub struct Entry {
     /// The file's contents are on this computer: false for a file a synced folder (iCloud Drive)
     /// keeps only in the cloud until it is opened, which reading would download.
     pub local: bool,
+    /// A design's CAD file beside it with the same name (STEP first), relative to the library
+    /// folder: what it was converted from, and what Reconvert makes it from again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 /// A scanned library folder.
@@ -112,8 +116,10 @@ pub fn scan(root: &str) -> Result<Library> {
             }
             continue;
         };
-        // This folder's parts by lower-case name: the best-ranked file of each.
+        // This folder's parts by lower-case name: the best-ranked file of each, and the best CAD
+        // file of each (a design's source).
         let mut here: std::collections::BTreeMap<String, (u8, Entry)> = Default::default();
+        let mut cad: std::collections::HashMap<String, (u8, String)> = Default::default();
         for item in read.flatten() {
             visited += 1;
             if visited > MAX_VISITED {
@@ -139,6 +145,9 @@ pub fn scan(root: &str) -> Result<Library> {
             };
             let ext = ext.to_ascii_lowercase();
             let Some((kind, order)) = rank(&ext) else { continue };
+            if kind == Kind::Cad && cad.get(&stem.to_lowercase()).is_none_or(|(best, _)| order < *best) {
+                cad.insert(stem.to_lowercase(), (order, inner.clone()));
+            }
             if here.get(&stem.to_lowercase()).is_some_and(|(best, _)| *best <= order) {
                 continue;
             }
@@ -156,11 +165,15 @@ pub fn scan(root: &str) -> Result<Library> {
                 description: None,
                 revision: None,
                 local,
+                source: None,
             };
             here.insert(stem.to_lowercase(), (order, entry));
         }
         let alone = here.len() == 1;
-        for (_, (_, mut entry)) in here {
+        for (stem, (_, mut entry)) in here {
+            if entry.kind == Kind::Design {
+                entry.source = cad.get(&stem).map(|(_, path)| path.clone());
+            }
             if alone {
                 name_after_folder(&mut entry);
             }
@@ -360,6 +373,7 @@ mod tests {
         assert_eq!(library.entries.len(), 1);
         let e = &library.entries[0];
         assert_eq!((e.kind, e.path.as_str()), (Kind::Design, "THRUSTERS/T200.solidcraft"));
+        assert_eq!(e.source.as_deref(), Some("THRUSTERS/T200.STEP"), "what it was converted from");
         assert_eq!((e.part_number.as_deref(), e.description.as_deref(), e.revision.as_deref()), (Some("BR-100545"), Some("T200 thruster"), None));
         let (found, matched) = search(&library, "br-100545", 10);
         assert_eq!((found.len(), matched), (1, 1), "the part number is searched");
@@ -428,6 +442,7 @@ mod tests {
             part_number: None,
             description: None,
             revision: None,
+            source: None,
             local: true,
         };
         let guess = |name: &str, path: &str| guess_part_number(&entry(name, path));

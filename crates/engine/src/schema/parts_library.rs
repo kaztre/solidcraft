@@ -122,11 +122,15 @@ pub struct PartsConvertParams {
     /// Who makes the part.
     #[serde(default, deserialize_with = "optional_text")]
     pub organization: Option<String>,
+    /// The part's revision.
+    #[serde(default, deserialize_with = "optional_text")]
+    pub revision: Option<String>,
     /// Turn a file whose header names a Y-up exporter (SolidWorks) a quarter turn about X, Y
     /// becoming Z. Default: false, the file is kept as it is.
     #[serde(default, deserialize_with = "optional_flag")]
     pub stand_up: Option<bool>,
-    /// Replace a design already beside the file. Default: false, which refuses.
+    /// Make the design already beside the file again, in place under its own name (its links
+    /// still find it): Reconvert. Default: false, which refuses.
     #[serde(default, deserialize_with = "optional_flag")]
     pub overwrite: Option<bool>,
 }

@@ -41,9 +41,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<PartsConvertReply>)
         .params(
             "path: a STEP, IGES or other CAD file SolidCraft reads; name?: the part's name (default the file's name); part_number?, \
-             description?, organization? (who makes it): its properties; stand_up?: bool (default false: the file is kept as it is; \
+             description?, organization? (who makes it), revision?: its properties; stand_up?: bool (default false: the file is kept as it is; \
              true: a file whose header names a Y-up exporter (SolidWorks) is turned a quarter turn about X, Y becoming Z); \
-             overwrite?: bool (default false: a design already beside the file is refused) → file (the design saved beside the CAD \
+             overwrite?: bool (default false: a design already beside the file, .sc or .solidcraft, is refused; true: it is made again in place under its own name, so links to it still find it) → file (the design saved beside the CAD \
              file, with its name and the .sc extension, and its picture), name, bodies, stood_up, exporter_up?. Never changes \
              the open design",
         ),
@@ -119,23 +119,25 @@ fn convert(_s: &mut Session, p: &Value) -> Result<Value> {
     }
     let source = std::path::Path::new(path);
     let stem = source.file_stem().and_then(|s| s.to_str()).filter(|s| !s.is_empty()).ok_or_else(|| bad(cmd, format!("{path} has no file name")))?;
-    let out = source.with_file_name(format!("{stem}.{}", solidcraft_io::DESIGN_EXT));
-    let out = out.to_str().ok_or_else(|| bad(cmd, "the design's path is not text"))?.to_string();
-    // A part converted before designs moved to `.sc` has its `.solidcraft` beside the file: that
-    // one is the library's part, so another is not made unless asked.
-    if !flag(cmd, p, "overwrite")? {
-        for ext in solidcraft_io::DESIGN_EXTS {
-            let there = source.with_file_name(format!("{stem}.{ext}"));
-            let there = there.to_string_lossy();
-            if solidcraft_io::vfs::design_path_is_file(&there, None) == Some(true) {
-                return Err(bad(cmd, format!("{there} already exists")));
-            }
+    // A design already beside the file (a part converted before, `.solidcraft` before designs
+    // moved to `.sc`) is the library's part: refused, or with `overwrite` (Reconvert) made again
+    // in place under its own name, so the designs that link it still find it.
+    let existing = solidcraft_io::DESIGN_EXTS
+        .iter()
+        .map(|ext| source.with_file_name(format!("{stem}.{ext}")).to_string_lossy().into_owned())
+        .find(|there| solidcraft_io::vfs::design_path_is_file(there, None) == Some(true));
+    let out = match existing {
+        Some(there) if !flag(cmd, p, "overwrite")? => return Err(bad(cmd, format!("{there} already exists"))),
+        Some(there) => there,
+        None => {
+            let out = source.with_file_name(format!("{stem}.{}", solidcraft_io::DESIGN_EXT));
+            out.to_str().ok_or_else(|| bad(cmd, "the design's path is not text"))?.to_string()
         }
-    }
+    };
     let name = text(cmd, p, "name")?.unwrap_or(stem).to_string();
     let stand_up = flag(cmd, p, "stand_up")?;
     let mut values = serde_json::Map::new();
-    for key in ["part_number", "description", "organization"] {
+    for key in ["part_number", "description", "organization", "revision"] {
         if let Some(v) = text(cmd, p, key)? {
             values.insert(key.into(), json!(v));
         }
@@ -246,6 +248,16 @@ mod tests {
         let again = s.execute("library.parts.convert", &params);
         assert!(again.unwrap_err().to_string().contains("already exists"), "converting again needs overwrite");
         s.execute("library.parts.convert", &json!({"path": step.to_str().unwrap(), "overwrite": true})).unwrap();
+        // A part converted before designs moved to `.sc` is made again in place, keeping its name
+        // (the designs that link it still find it), and no second design appears beside it.
+        let legacy = dir.join("THRUSTERS/BR-100545.solidcraft");
+        std::fs::rename(&file, &legacy).unwrap();
+        let r = s.execute("library.parts.convert", &json!({"path": step.to_str().unwrap(), "overwrite": true, "revision": "B"})).unwrap();
+        assert_eq!(r["file"], json!(legacy.to_str().unwrap()));
+        assert!(!file.exists(), "no .sc beside the .solidcraft");
+        let doc = solidcraft_io::read_design(&std::fs::read(&legacy).unwrap()).unwrap();
+        assert_eq!(doc.metadata.0.get("revision"), Some(&json!("B")));
+        assert!(solidcraft_io::read_design_thumbnail(&std::fs::read(&legacy).unwrap()).is_some(), "with its picture");
         for bad in [json!({}), json!({"path": dir.join("notes.pdf").to_str().unwrap()}), json!({"path": step.to_str().unwrap(), "stand_up": "yes"})] {
             assert!(s.execute("library.parts.convert", &bad).is_err(), "{bad}");
         }

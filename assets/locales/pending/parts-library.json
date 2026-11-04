@@ -35,7 +35,10 @@
     "ui.parts_library_search": "Search by name, part number, vendor or category",
     "ui.parts_library_stand_up": "Stand up parts exported with Y up (SolidWorks)",
     "ui.parts_library_stop": "Stop",
-    "help.library.parts.search": "Opens the Parts Library: browse and search folders of parts, and insert one into the design. Use it for parts you use again and again, such as fasteners, connectors and bought-in components."
+    "help.library.parts.search": "Opens the Parts Library: browse and search folders of parts, and insert one into the design. Use it for parts you use again and again, such as fasteners, connectors and bought-in components.",
+    "ui.parts_library_reconvert": "Reconvert {count}…",
+    "ui.parts_library_reconvert_tip": "Make the parts in this category again from their STEP and IGES files, with today's import and their pictures",
+    "ui.parts_library_reconvert_explain": "Makes the {count} SolidCraft parts in this category again from the STEP and IGES files beside them, with today's import and their pictures. Each keeps its file name, part number and description, so the designs that link it still find it and offer Update. Large parts take a while; you can keep working, and Stop at any time."
   },
   "de": {
     "cmd.library.parts.convert": "In Bibliotheksteil umwandeln",
@@ -73,7 +76,10 @@
     "ui.parts_library_search": "Nach Name, Teilenummer, Hersteller oder Kategorie suchen",
     "ui.parts_library_stand_up": "Mit Y nach oben exportierte Teile aufrichten (SolidWorks)",
     "ui.parts_library_stop": "Anhalten",
-    "help.library.parts.search": "Öffnet die Teilebibliothek: Ordner mit Teilen durchsehen und durchsuchen und ein Teil in die Konstruktion einfügen. Für Teile, die Sie immer wieder verwenden, etwa Verbindungselemente, Steckverbinder und Zukaufteile."
+    "help.library.parts.search": "Öffnet die Teilebibliothek: Ordner mit Teilen durchsehen und durchsuchen und ein Teil in die Konstruktion einfügen. Für Teile, die Sie immer wieder verwenden, etwa Verbindungselemente, Steckverbinder und Zukaufteile.",
+    "ui.parts_library_reconvert": "{count} neu konvertieren…",
+    "ui.parts_library_reconvert_tip": "Die Teile dieser Kategorie aus ihren STEP- und IGES-Dateien neu erstellen, mit dem heutigen Import und ihren Bildern",
+    "ui.parts_library_reconvert_explain": "Erstellt die {count} SolidCraft-Teile dieser Kategorie aus den STEP- und IGES-Dateien daneben neu, mit dem heutigen Import und ihren Bildern. Jedes behält Dateinamen, Teilenummer und Beschreibung, sodass Konstruktionen, die es verknüpfen, es weiter finden und Aktualisieren anbieten. Große Teile dauern eine Weile; Sie können weiterarbeiten und jederzeit Stoppen."
   },
   "ja": {
     "cmd.library.parts.convert": "ライブラリ部品に変換",
@@ -111,7 +117,10 @@
     "ui.parts_library_search": "名前、部品番号、メーカー、カテゴリーで検索",
     "ui.parts_library_stand_up": "Y 軸を上にして書き出された部品を立てる（SolidWorks）",
     "ui.parts_library_stop": "停止",
-    "help.library.parts.search": "部品ライブラリを開きます。部品のフォルダーを参照・検索して、部品をデザインに挿入できます。締結部品、コネクター、購入部品など、繰り返し使う部品に使います。"
+    "help.library.parts.search": "部品ライブラリを開きます。部品のフォルダーを参照・検索して、部品をデザインに挿入できます。締結部品、コネクター、購入部品など、繰り返し使う部品に使います。",
+    "ui.parts_library_reconvert": "{count} 件を再変換…",
+    "ui.parts_library_reconvert_tip": "このカテゴリの部品を STEP・IGES ファイルから作り直します（現在のインポートで、画像付き）",
+    "ui.parts_library_reconvert_explain": "このカテゴリにある {count} 個の SolidCraft 部品を、隣にある STEP・IGES ファイルから現在のインポートで作り直し、画像も付けます。各部品のファイル名・部品番号・説明はそのままなので、リンクしている設計からも引き続き見つかり、更新が提示されます。大きな部品は時間がかかります。作業を続けることも、いつでも停止することもできます。"
   },
   "zh": {
     "cmd.library.parts.convert": "转换为库零件",
@@ -149,7 +158,10 @@
     "ui.parts_library_search": "按名称、零件编号、供应商或类别搜索",
     "ui.parts_library_stand_up": "将以 Y 轴朝上导出的零件立起（SolidWorks）",
     "ui.parts_library_stop": "停止",
-    "help.library.parts.search": "打开零件库：浏览和搜索零件文件夹，并将零件插入设计。用于反复使用的零件，例如紧固件、连接器和外购件。"
+    "help.library.parts.search": "打开零件库：浏览和搜索零件文件夹，并将零件插入设计。用于反复使用的零件，例如紧固件、连接器和外购件。",
+    "ui.parts_library_reconvert": "重新转换 {count} 个…",
+    "ui.parts_library_reconvert_tip": "用当前的导入功能，从 STEP 和 IGES 文件重新生成此类别中的零件，并附带图片",
+    "ui.parts_library_reconvert_explain": "用当前的导入功能，从旁边的 STEP 和 IGES 文件重新生成此类别中的 {count} 个 SolidCraft 零件，并附带图片。每个零件保留其文件名、零件编号和描述，因此链接它的设计仍能找到它并提示更新。大型零件需要一些时间；你可以继续工作，也可以随时停止。"
   },
   "ko": {
     "cmd.library.parts.convert": "라이브러리 부품으로 변환",
@@ -187,7 +199,10 @@
     "ui.parts_library_search": "이름, 부품 번호, 공급업체 또는 범주로 검색",
     "ui.parts_library_stand_up": "Y축이 위로 내보내진 부품 세우기 (SolidWorks)",
     "ui.parts_library_stop": "중지",
-    "help.library.parts.search": "부품 라이브러리를 엽니다. 부품 폴더를 둘러보고 검색하여 부품을 디자인에 삽입합니다. 체결 부품, 커넥터, 구매 부품처럼 반복해서 사용하는 부품에 사용합니다."
+    "help.library.parts.search": "부품 라이브러리를 엽니다. 부품 폴더를 둘러보고 검색하여 부품을 디자인에 삽입합니다. 체결 부품, 커넥터, 구매 부품처럼 반복해서 사용하는 부품에 사용합니다.",
+    "ui.parts_library_reconvert": "{count}개 다시 변환…",
+    "ui.parts_library_reconvert_tip": "이 범주의 부품을 STEP 및 IGES 파일에서 현재 가져오기 방식으로 그림과 함께 다시 만듭니다",
+    "ui.parts_library_reconvert_explain": "이 범주의 SolidCraft 부품 {count}개를 옆에 있는 STEP 및 IGES 파일에서 현재 가져오기 방식으로 그림과 함께 다시 만듭니다. 각 부품은 파일 이름, 부품 번호, 설명을 그대로 유지하므로 연결된 설계에서 계속 찾을 수 있고 업데이트가 제안됩니다. 큰 부품은 시간이 걸립니다. 계속 작업할 수 있으며 언제든 중지할 수 있습니다."
   },
   "ar": {
     "cmd.library.parts.convert": "تحويل إلى قطعة مكتبة",
@@ -225,7 +240,10 @@
     "ui.parts_library_search": "ابحث بالاسم أو رقم القطعة أو المورّد أو الفئة",
     "ui.parts_library_stand_up": "إقامة القطع المصدّرة ومحور Y للأعلى (SolidWorks)",
     "ui.parts_library_stop": "إيقاف",
-    "help.library.parts.search": "يفتح مكتبة القطع: تصفّح مجلدات القطع وابحث فيها، وأدرج قطعة في التصميم. استخدمه للقطع التي تستخدمها مرارًا وتكرارًا، مثل أدوات التثبيت والموصلات والمكونات المشتراة."
+    "help.library.parts.search": "يفتح مكتبة القطع: تصفّح مجلدات القطع وابحث فيها، وأدرج قطعة في التصميم. استخدمه للقطع التي تستخدمها مرارًا وتكرارًا، مثل أدوات التثبيت والموصلات والمكونات المشتراة.",
+    "ui.parts_library_reconvert": "إعادة تحويل {count}…",
+    "ui.parts_library_reconvert_tip": "إعادة إنشاء أجزاء هذه الفئة من ملفات STEP وIGES الخاصة بها بالاستيراد الحالي ومع صورها",
+    "ui.parts_library_reconvert_explain": "يعيد إنشاء أجزاء SolidCraft البالغ عددها {count} في هذه الفئة من ملفات STEP وIGES المجاورة لها بالاستيراد الحالي ومع صورها. يحتفظ كل جزء باسم ملفه ورقمه ووصفه، فتظل التصاميم المرتبطة به تجده وتعرض التحديث. تستغرق الأجزاء الكبيرة بعض الوقت؛ يمكنك متابعة العمل والإيقاف في أي وقت."
   },
   "he": {
     "cmd.library.parts.convert": "המרה לחלק ספרייה",
@@ -263,7 +281,10 @@
     "ui.parts_library_search": "חיפוש לפי שם, מספר חלק, ספק או קטגוריה",
     "ui.parts_library_stand_up": "הקמת חלקים שיוצאו עם Y למעלה (SolidWorks)",
     "ui.parts_library_stop": "עצירה",
-    "help.library.parts.search": "פתיחת ספריית החלקים: עיון וחיפוש בתיקיות של חלקים, והוספת חלק לתכנון. מתאים לחלקים שמשתמשים בהם שוב ושוב, כמו מחברים, קונקטורים ורכיבים קנויים."
+    "help.library.parts.search": "פתיחת ספריית החלקים: עיון וחיפוש בתיקיות של חלקים, והוספת חלק לתכנון. מתאים לחלקים שמשתמשים בהם שוב ושוב, כמו מחברים, קונקטורים ורכיבים קנויים.",
+    "ui.parts_library_reconvert": "המרה מחדש של {count}…",
+    "ui.parts_library_reconvert_tip": "בניית החלקים בקטגוריה הזו מחדש מקובצי ה-STEP וה-IGES שלהם, בייבוא של היום ועם התמונות שלהם",
+    "ui.parts_library_reconvert_explain": "בונה מחדש את {count} חלקי SolidCraft בקטגוריה הזו מקובצי ה-STEP וה-IGES שלידם, בייבוא של היום ועם התמונות שלהם. כל חלק שומר על שם הקובץ, מספר החלק והתיאור שלו, כך שתכנונים שמקשרים אליו עדיין מוצאים אותו ומציעים עדכון. חלקים גדולים לוקחים זמן; אפשר להמשיך לעבוד ולעצור בכל עת."
   },
   "vi": {
     "cmd.library.parts.convert": "Chuyển đổi thành chi tiết thư viện",
@@ -301,6 +322,9 @@
     "ui.parts_library_search": "Tìm theo tên, mã số chi tiết, nhà cung cấp hoặc danh mục",
     "ui.parts_library_stand_up": "Dựng đứng các chi tiết được xuất với trục Y hướng lên (SolidWorks)",
     "ui.parts_library_stop": "Dừng",
-    "help.library.parts.search": "Mở Thư viện chi tiết: duyệt và tìm kiếm các thư mục chi tiết, rồi chèn một chi tiết vào thiết kế. Dùng cho những chi tiết bạn dùng đi dùng lại, như chi tiết kẹp chặt, đầu nối và linh kiện mua ngoài."
+    "help.library.parts.search": "Mở Thư viện chi tiết: duyệt và tìm kiếm các thư mục chi tiết, rồi chèn một chi tiết vào thiết kế. Dùng cho những chi tiết bạn dùng đi dùng lại, như chi tiết kẹp chặt, đầu nối và linh kiện mua ngoài.",
+    "ui.parts_library_reconvert": "Chuyển đổi lại {count}…",
+    "ui.parts_library_reconvert_tip": "Tạo lại các chi tiết trong danh mục này từ tệp STEP và IGES của chúng, bằng cách nhập hiện tại và kèm hình ảnh",
+    "ui.parts_library_reconvert_explain": "Tạo lại {count} chi tiết SolidCraft trong danh mục này từ các tệp STEP và IGES bên cạnh, bằng cách nhập hiện tại và kèm hình ảnh. Mỗi chi tiết giữ nguyên tên tệp, mã số chi tiết và mô tả, nên các thiết kế liên kết đến nó vẫn tìm thấy và đề xuất Cập nhật. Chi tiết lớn sẽ mất một lúc; bạn có thể tiếp tục làm việc và Dừng bất cứ lúc nào."
   }
 }

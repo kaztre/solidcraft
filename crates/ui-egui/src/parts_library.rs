@@ -204,25 +204,34 @@ impl Pictures {
     }
 }
 
-/// A part's picture: a design's own, or a CAD file's, drawn once and cached on this computer.
+/// A part's picture: a design's own, or a CAD file's, drawn once and cached on this computer. A
+/// design saved without one (parts converted by earlier builds) is drawn like a CAD file: the
+/// part's file is never changed.
 fn make_picture(r: &PictureRequest, stop: &AtomicBool) -> Option<egui::ColorImage> {
     match r.kind {
-        Kind::Design => crate::home::decode_thumbnail(solidcraft_engine::io::read_design_thumbnail_file(&r.file)?),
-        Kind::Cad => {
-            #[cfg(not(target_arch = "wasm32"))]
-            if let Some(picture) = crate::home::cached(&r.file) {
-                return Some(picture);
-            }
-            if !r.asked && (!r.local || r.bytes > AUTO_PICTURE_BYTES) {
-                return None;
-            }
-            let s = open_cad(&r.file, stop)?;
-            crate::home::remember_file(&s, &r.file)
-        }
+        Kind::Design => match solidcraft_engine::io::read_design_thumbnail_file(&r.file) {
+            Some(bytes) => crate::home::decode_thumbnail(bytes),
+            None => drawn(r, stop),
+        },
+        Kind::Cad => drawn(r, stop),
     }
 }
 
-/// A session holding the CAD file `file`, read by a helper process (`solidcraft_engine::helper`):
+/// `r`'s file drawn from its model, by a helper, and cached under the file; a large or remote
+/// file only when the user asks.
+fn drawn(r: &PictureRequest, stop: &AtomicBool) -> Option<egui::ColorImage> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(picture) = crate::home::cached(&r.file) {
+        return Some(picture);
+    }
+    if !r.asked && (!r.local || r.bytes > AUTO_PICTURE_BYTES) {
+        return None;
+    }
+    let s = open_cad(&r.file, stop)?;
+    crate::home::remember_file(&s, &r.file)
+}
+
+/// A session holding the CAD file or design `file`, read by a helper process (`solidcraft_engine::helper`):
 /// the helper saves what it read as a design, and this process opens that, so a file that crashes
 /// the geometry kernel fails only its picture. Without helpers it is read here.
 fn open_cad(file: &str, stop: &AtomicBool) -> Option<solidcraft_engine::Session> {
@@ -240,6 +249,17 @@ fn open_cad(file: &str, stop: &AtomicBool) -> Option<solidcraft_engine::Session>
     let opened = saved.is_ok() && s.execute("doc.open", &json!({"path": read})).is_ok();
     let _ = std::fs::remove_file(&read);
     opened.then_some(s)
+}
+
+/// A converted part made again from its CAD file `file`: in place, its name and properties kept.
+fn reconvert_params(entry: &Entry, file: &str, stand_up: bool) -> Value {
+    let mut p = json!({"path": file, "name": entry.name, "stand_up": stand_up, "overwrite": true});
+    for (key, value) in [("part_number", &entry.part_number), ("description", &entry.description), ("revision", &entry.revision)] {
+        if let Some(v) = value {
+            p[key] = json!(v);
+        }
+    }
+    p
 }
 
 /// A part's library properties, guessed from its names for a conversion.
@@ -293,6 +313,9 @@ pub struct PartsLibrary {
     pictures: Pictures,
     /// Asking before converting a category: whether to stand up Y-up files.
     pub confirm_convert: Option<bool>,
+    /// The question is for Reconvert: the parts already converted, made again from their CAD
+    /// files in place.
+    reconvert: bool,
     converting: Option<Converting>,
     inserting: Option<Inserting>,
     /// The last refusal, or what the last action did.
@@ -311,6 +334,7 @@ impl PartsLibrary {
             grid: true,
             pictures: Pictures::default(),
             confirm_convert: None,
+            reconvert: false,
             converting: None,
             inserting: None,
             note: None,
@@ -489,18 +513,28 @@ fn poll_insert(app: &mut SolveApp, w: &mut PartsLibrary) {
     }
 }
 
-/// Convert every CAD part in the picked category, one after another beside the window.
-fn start_converting(w: &mut PartsLibrary, stand_up: bool) {
+/// Convert every CAD part in the picked category, one after another beside the window; with
+/// `reconvert`, make every part already converted again from its CAD file, in place under its own
+/// name and with its properties (parts converted by earlier builds get today's import and their
+/// picture, and the designs that link them still find them).
+fn start_converting(w: &mut PartsLibrary, stand_up: bool, reconvert: bool) {
     let Some((lib, _)) = &w.scope else { return };
     let lib = *lib;
     let Some(library) = w.libs.get(lib).and_then(|l| l.library.as_ref()) else { return };
     let jobs: Vec<(String, Value)> = library
         .entries
         .iter()
-        .filter(|e| e.kind == Kind::Cad && in_scope(&w.scope, lib, e))
-        .map(|e| {
-            let file = library.absolute(e).to_string_lossy().into_owned();
-            (e.name.clone(), convert_params(e, &file, stand_up))
+        .filter(|e| in_scope(&w.scope, lib, e))
+        .filter_map(|e| match (reconvert, e.kind, &e.source) {
+            (false, Kind::Cad, _) => {
+                let file = library.absolute(e).to_string_lossy().into_owned();
+                Some((e.name.clone(), convert_params(e, &file, stand_up)))
+            }
+            (true, Kind::Design, Some(source)) => {
+                let file = std::path::Path::new(&library.root).join(source).to_string_lossy().into_owned();
+                Some((e.name.clone(), reconvert_params(e, &file, stand_up)))
+            }
+            _ => None,
         })
         .collect();
     let stop = std::sync::Arc::new(AtomicBool::new(false));
@@ -549,6 +583,10 @@ fn poll_converting(w: &mut PartsLibrary, ctx: &egui::Context) {
     let lib = c.library;
     if rescan && let Some(l) = w.libs.get_mut(lib) {
         l.rescan(&w.workers);
+        // Converted parts have their pictures in their files now: every card asks again.
+        w.pictures.textures.clear();
+        w.pictures.requested.clear();
+        w.pictures.asked.clear();
     }
 }
 
@@ -769,6 +807,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                             .map_or(0, |library| library.entries.iter().filter(|e| e.kind == Kind::Cad && in_scope(&w.scope, *lib, e)).count()),
                         None => 0,
                     };
+                    let made_here = match &w.scope {
+                        Some((lib, _)) => w.libs.get(*lib).and_then(|l| l.library.as_ref()).map_or(0, |library| {
+                            library.entries.iter().filter(|e| e.kind == Kind::Design && e.source.is_some() && in_scope(&w.scope, *lib, e)).count()
+                        }),
+                        None => 0,
+                    };
                     let entry = w.picked.clone().and_then(|p| w.entry(&p).map(|(_, e)| e.clone()));
                     ui.horizontal_wrapped(|ui| {
                         let busy = w.inserting.is_some();
@@ -784,6 +828,16 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                             let label = format("ui.parts_library_convert", &[("count", &cad_here.to_string())]);
                             if crate::ui_kit::button(ui, &label, crate::ui_kit::Button::Normal).clicked() {
                                 w.confirm_convert = Some(stand_up_default);
+                                w.reconvert = false;
+                            }
+                        }
+                        if made_here > 0 && w.converting.as_ref().is_none_or(|c| c.finished) {
+                            let label = format("ui.parts_library_reconvert", &[("count", &made_here.to_string())]);
+                            let button =
+                                crate::ui_kit::button(ui, &label, crate::ui_kit::Button::Normal).on_hover_text(tr("ui.parts_library_reconvert_tip"));
+                            if button.clicked() {
+                                w.confirm_convert = Some(stand_up_default);
+                                w.reconvert = true;
                             }
                         }
                         let shown = found.len().min(matched).to_string();
@@ -799,7 +853,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                     if let Some(mut stand_up) = w.confirm_convert {
                         ui.separator();
-                        ui.label(format("ui.parts_library_convert_explain", &[("count", &cad_here.to_string())]));
+                        if w.reconvert {
+                            ui.label(format("ui.parts_library_reconvert_explain", &[("count", &made_here.to_string())]));
+                        } else {
+                            ui.label(format("ui.parts_library_convert_explain", &[("count", &cad_here.to_string())]));
+                        }
                         crate::ui_kit::checkbox(ui, tr("ui.parts_library_stand_up"), &mut stand_up);
                         let mut cancel = false;
                         ui.horizontal(|ui| {
@@ -903,7 +961,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if let Some(stand_up) = start_convert {
         app.preferences.parts_library_stand_up = stand_up;
         w.confirm_convert = None;
-        start_converting(&mut w, stand_up);
+        let reconvert = w.reconvert;
+        start_converting(&mut w, stand_up, reconvert);
     }
     if insert_picked && let Some(picked) = w.picked.clone() {
         insert(app, &mut w, &picked);
@@ -1019,6 +1078,25 @@ mod tests {
     }
 
     #[test]
+    fn a_part_saved_without_a_picture_gets_one_drawn() {
+        // Parts converted by earlier builds have no picture in their file.
+        crate::gpu::install_cpu_picture_renderer();
+        let dir = std::env::temp_dir().join(format!("solidcraft-library-picture-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 5})).unwrap();
+        let file = dir.join("Plain.solidcraft");
+        std::fs::write(&file, solidcraft_engine::io::write_design_container(&s.doc).unwrap()).unwrap();
+        let file = file.to_string_lossy().into_owned();
+        assert!(solidcraft_engine::io::read_design_thumbnail_file(&file).is_none(), "saved with no picture");
+        let r = super::PictureRequest { bytes: std::fs::metadata(&file).unwrap().len(), file, kind: super::Kind::Design, local: true, asked: false };
+        let picture = super::make_picture(&r, &std::sync::atomic::AtomicBool::new(false));
+        assert!(picture.is_some(), "drawn from its model");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn insert_links_a_library_design() {
         let mut h = Harness::new();
         h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 3})).unwrap();
@@ -1087,5 +1165,19 @@ mod tests {
         assert!(h.widget("Converted 1 of 1 parts.").is_some());
         let entries = &h.app.parts_library.as_ref().unwrap().libs[0].library.as_ref().unwrap().entries;
         assert!(entries.iter().all(|e| e.kind == super::Kind::Design));
+        // Reconvert: both parts made again in place from their STEP files, names kept.
+        let t200 = std::path::Path::new(&folder).join("THRUSTERS/T200_THRUSTER_BR-100545/T200.sc");
+        let before = std::fs::metadata(&t200).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        h.frames(2);
+        h.step(&json!({"widget": "Reconvert 2…"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"widget": "Start Converting"})).unwrap();
+        wait(&mut h, |w| w.converting.as_ref().is_some_and(|c| c.finished));
+        assert!(h.widget("Converted 2 of 2 parts.").is_some());
+        assert!(std::fs::metadata(&t200).unwrap().modified().unwrap() > before, "made again in place");
+        let doc = solidcraft_engine::io::read_design(&std::fs::read(&t200).unwrap()).unwrap();
+        assert_eq!(doc.metadata.0.get("part_number"), Some(&json!("BR-100545")), "its properties kept");
+        assert_eq!(h.app.session.doc.links.len(), 1, "the link still names the same file");
     }
 }

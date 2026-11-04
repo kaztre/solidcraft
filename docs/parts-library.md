@@ -90,10 +90,17 @@ couldn't be converted and why (a file over the 512 MB import limit, a file Solid
 Converting downloads every file a synced folder keeps only in the cloud, and large assemblies take
 minutes each, so try one category first.
 
+**Reconvert N…** makes the parts already converted in the category again from the STEP and IGES
+files beside them, with this release's import: parts converted by an earlier release get today's
+geometry and their picture, and open faster. Each part keeps its file name (a `.solidcraft` part
+stays `.solidcraft`), part number, description and revision, so the designs that link it still
+find it and offer **Update**. A part with no CAD file beside it is left as it is.
+
 ## Pictures
 
-A SolidCraft part shows the picture saved in it. A STEP or IGES part's picture is drawn once and
-kept on this computer. So that a library in iCloud Drive or Google Drive isn't downloaded just to be
+A SolidCraft part shows the picture saved in it; one saved without a picture (converted by an
+earlier release) has one drawn, as a STEP or IGES part does. A STEP or IGES part's picture is drawn
+once and kept on this computer; the part's file is never changed for it. So that a library in iCloud Drive or Google Drive isn't downloaded just to be
 browsed, a picture is drawn by itself only for a file already on this computer and up to 30 MB;
 the others show a download sign until you click them. Converting a category gives every part its
 picture, for everyone who uses the library.
