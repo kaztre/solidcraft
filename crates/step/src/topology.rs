@@ -1413,7 +1413,8 @@ impl<'b, 'a> Builder<'b, 'a> {
                     None => self.face_extent(fi)?,
                 };
                 let extent = extent.ok_or_else(|| unsupported("a face whose boundary does not lie on its surface"))?;
-                let (f, d) = solidcraft_geom::brep::form::surface_within(&label, extent, tol).ok_or_else(|| unsupported("a face of more than one turn"))?;
+                let (f, d) =
+                    solidcraft_geom::brep::form::surface_within(&label, extent, tol).ok_or_else(|| unsupported("a face of more than one turn"))?;
                 Some((f, d, extent[0][0]))
             }
             None => None,
@@ -1435,7 +1436,12 @@ impl<'b, 'a> Builder<'b, 'a> {
             Some(starts) => exact
                 .into_iter()
                 .zip(starts)
-                .map(|(l, s)| l.into_iter().zip(s).map(|(c, s)| c.map(|c| onto_turn(c, s.map(solidcraft_geom::brep::form::param))).transpose()).collect::<R<Vec<_>>>())
+                .map(|(l, s)| {
+                    l.into_iter()
+                        .zip(s)
+                        .map(|(c, s)| c.map(|c| onto_turn(c, s.map(solidcraft_geom::brep::form::param))).transpose())
+                        .collect::<R<Vec<_>>>()
+                })
                 .collect::<R<Vec<_>>>()?,
             None => exact,
         };

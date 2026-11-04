@@ -78,7 +78,9 @@ impl Library {
 /// `None`: not a library file (meshes, drawings, SolidWorks parts).
 fn rank(ext: &str) -> Option<(Kind, u8)> {
     match ext {
-        e if e == crate::DESIGN_EXT => Some((Kind::Design, 0)),
+        // A design under any extension a design has had: `.sc`, and `.solidcraft` parts converted
+        // before designs moved to `.sc`.
+        e if crate::DESIGN_EXTS.contains(&e) => Some((Kind::Design, 0)),
         "step" | "stp" => Some((Kind::Cad, 1)),
         "igs" | "iges" => Some((Kind::Cad, 2)),
         e if crate::NATIVE_CAD_EXTS.contains(&e) => Some((Kind::Cad, 3)),
@@ -361,6 +363,17 @@ mod tests {
         assert_eq!((e.part_number.as_deref(), e.description.as_deref(), e.revision.as_deref()), (Some("BR-100545"), Some("T200 thruster"), None));
         let (found, matched) = search(&library, "br-100545", 10);
         assert_eq!((found.len(), matched), (1, 1), "the part number is searched");
+    }
+
+    #[test]
+    fn a_part_converted_as_sc_and_one_from_before_as_solidcraft_are_both_designs() {
+        let (dir, _) = library(&["THRUSTERS/T200.STEP", "THRUSTERS/T500.STEP"]);
+        let bytes = crate::write_design_container(&solidcraft_doc::Document::new("part")).unwrap();
+        std::fs::write(dir.path().join("THRUSTERS/T200.sc"), &bytes).unwrap();
+        std::fs::write(dir.path().join("THRUSTERS/T500.solidcraft"), &bytes).unwrap();
+        let library = scan(dir.path().to_str().unwrap()).unwrap();
+        let listed: Vec<(Kind, &str)> = library.entries.iter().map(|e| (e.kind, e.path.as_str())).collect();
+        assert_eq!(listed, [(Kind::Design, "THRUSTERS/T200.sc"), (Kind::Design, "THRUSTERS/T500.solidcraft")]);
     }
 
     #[test]

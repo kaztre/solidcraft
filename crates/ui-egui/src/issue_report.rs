@@ -112,6 +112,10 @@ pub struct ReportState {
     /// The report's field that had focus when a capture hid it.
     refocus: Option<egui::Id>,
     cad_focus: Option<egui::Id>,
+    /// Where opening a report on GitHub also keeps a copy with the design and the commands that
+    /// led to it (`solidcraft_engine::bug_report`, docs/crash-reports.md); None: no copy (tests,
+    /// the web app). The desktop app sets it.
+    pub dir: Option<std::path::PathBuf>,
 }
 
 /// How long a screenshot waits for a preview being computed before it shows it unfinished.
@@ -149,6 +153,8 @@ pub struct Draft {
     focus_requested: bool,
     missing_description: bool,
     opened_github: bool,
+    /// The reviewed text last kept on this computer ([`keep_copy`]): the same report is kept once.
+    kept: Option<u64>,
 }
 
 impl Draft {
@@ -170,6 +176,7 @@ impl Draft {
             focus_requested: false,
             missing_description: false,
             opened_github: false,
+            kept: None,
         }
     }
 
@@ -600,6 +607,40 @@ fn encode(value: &str) -> String {
     out
 }
 
+/// Keep a copy of the reviewed report in [`ReportState::dir`], with the design as it is and the
+/// commands that led here, as GitHub opens: the issue holds the text, the copy what it takes to
+/// reproduce the fault. Each reviewed text is kept once; a copy that can't be written is logged.
+pub(super) fn keep_copy(app: &SolveApp, draft: &mut Draft) {
+    let Some(dir) = app.issue_report.dir.clone() else { return };
+    let (title, body) = (draft.report_title(), draft.report_body());
+    let signature = {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (&title, &body, draft.image.as_ref().map(|i| i.size)).hash(&mut h);
+        h.finish()
+    };
+    if draft.kept == Some(signature) {
+        return;
+    }
+    let screenshot_png = draft.image.as_ref().and_then(|image| {
+        let rgba: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
+        solidcraft_engine::render::png(image.size[0], image.size[1], rgba)
+    });
+    let request = solidcraft_engine::bug_report::Request {
+        title,
+        what_happened: draft.description.clone(),
+        expected: draft.expected.clone(),
+        steps: draft.steps.clone(),
+        dialog: None,
+        context: body,
+        screenshot_png,
+    };
+    match solidcraft_engine::bug_report::write(&app.session, &dir, &request) {
+        Ok(_) => draft.kept = Some(signature),
+        Err(e) => log::warn!("the bug report's copy on this computer was not written: {e}"),
+    }
+}
+
 /// Long drafts stay local and can be copied into the browser editor; never discard them.
 pub fn draft_url(title: &str, body: &str) -> (String, bool) {
     let title = limited(title, 160);
@@ -1002,6 +1043,29 @@ mod tests {
         assert!(!draft.missing_description && !draft.opened_github);
         assert_eq!(draft.note, "Report copied. Keep this text to submit on GitHub when you are online.");
         assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.revision, h.app.session.undo.len()));
+    }
+
+    #[test]
+    fn opening_a_report_on_github_keeps_one_copy_on_this_computer() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-report-copy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.issue_report.dir = Some(dir.clone());
+        let mut draft = draft_for(&h.app, None, None);
+        draft.description = "The preview disappeared".into();
+        h.app.issue_report.draft = Some(draft);
+        h.frames(16);
+        let commands = open_commands(&mut h);
+        assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(url) if url.url.starts_with(ISSUE_URL))));
+        let saved = solidcraft_engine::bug_report::list(&dir);
+        assert_eq!(saved.len(), 1, "a copy stays on this computer");
+        let report = solidcraft_engine::bug_report::read(&dir, &saved[0].id).unwrap();
+        assert_eq!(report["what_happened"], "The preview disappeared");
+        // Opened again unedited: no second copy.
+        open_commands(&mut h);
+        assert_eq!(solidcraft_engine::bug_report::list(&dir).len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

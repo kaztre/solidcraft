@@ -13,11 +13,9 @@ and the exact commands that trigger it. Reports are never sent anywhere.
    GitHub, or use **Save screenshot…** and upload the PNG. Screenshots are not attached automatically.
 3. Click **Submit new issue** on GitHub to publish the report. Opening the draft alone does not send it.
 
-**Report a bug** (the app bar, Help, a failed feature's **Create Issue…**, or **Report…** in
-Help ▸ Crash Reports…) opens a form. Describe what happened, review the technical details and
-the screenshot, then click **Save report**. The report is saved on this computer in `reports/`,
-next to `crashes/` (on macOS `~/Library/Application Support/SolidCraft/reports`), and nothing
-is sent anywhere. Each report is a folder holding:
+When **Open GitHub issue form** opens the report, the desktop app also keeps a copy on this
+computer in `reports/`, next to `crashes/` (on macOS `~/Library/Application Support/SolidCraft/reports`),
+once per reviewed text. The copy is never sent anywhere. Each copy is a folder holding:
 
 - `report.json`: what you wrote, the app and system, the command the open dialog would run,
   every feature's error and warning, the recent commands, and the report's status

@@ -44,7 +44,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              description?, organization? (who makes it): its properties; stand_up?: bool (default false: the file is kept as it is; \
              true: a file whose header names a Y-up exporter (SolidWorks) is turned a quarter turn about X, Y becoming Z); \
              overwrite?: bool (default false: a design already beside the file is refused) → file (the design saved beside the CAD \
-             file, with its name and the .solidcraft extension, and its picture), name, bodies, stood_up, exporter_up?. Never changes \
+             file, with its name and the .sc extension, and its picture), name, bodies, stood_up, exporter_up?. Never changes \
              the open design",
         ),
 ];
@@ -121,8 +121,16 @@ fn convert(_s: &mut Session, p: &Value) -> Result<Value> {
     let stem = source.file_stem().and_then(|s| s.to_str()).filter(|s| !s.is_empty()).ok_or_else(|| bad(cmd, format!("{path} has no file name")))?;
     let out = source.with_file_name(format!("{stem}.{}", solidcraft_io::DESIGN_EXT));
     let out = out.to_str().ok_or_else(|| bad(cmd, "the design's path is not text"))?.to_string();
-    if !flag(cmd, p, "overwrite")? && solidcraft_io::vfs::design_path_is_file(&out, None) == Some(true) {
-        return Err(bad(cmd, format!("{out} already exists")));
+    // A part converted before designs moved to `.sc` has its `.solidcraft` beside the file: that
+    // one is the library's part, so another is not made unless asked.
+    if !flag(cmd, p, "overwrite")? {
+        for ext in solidcraft_io::DESIGN_EXTS {
+            let there = source.with_file_name(format!("{stem}.{ext}"));
+            let there = there.to_string_lossy();
+            if solidcraft_io::vfs::design_path_is_file(&there, None) == Some(true) {
+                return Err(bad(cmd, format!("{there} already exists")));
+            }
+        }
     }
     let name = text(cmd, p, "name")?.unwrap_or(stem).to_string();
     let stand_up = flag(cmd, p, "stand_up")?;
@@ -153,6 +161,8 @@ fn convert(_s: &mut Session, p: &Value) -> Result<Value> {
         part.execute("document.metadata.set", &json!({"values": values}))?;
     }
     part.doc_mut().name.clone_from(&name);
+    // Chosen, not borrowed: the save keeps it rather than taking the file's name.
+    part.user_named = true;
     // Display meshes ready, so the save draws the part's picture into the file.
     let world = part.world_state()?;
     let bodies = world.bodies.len();
@@ -214,7 +224,7 @@ mod tests {
         let params = json!({"path": step.to_str().unwrap(), "name": "T200 thruster", "part_number": "BR-100545", "description": "T200 thruster", "stand_up": true});
         let r = s.execute("library.parts.convert", &params).unwrap();
         assert_eq!(s.doc.to_json(), before, "the open design is never touched");
-        let file = dir.join("THRUSTERS/BR-100545.solidcraft");
+        let file = dir.join("THRUSTERS/BR-100545.sc");
         assert_eq!(r["file"], json!(file.to_str().unwrap()));
         assert_eq!((r["bodies"].as_u64(), r["stood_up"].as_bool()), (Some(1), Some(false)), "SolidCraft's own STEP is Z up: {r}");
         let bytes = std::fs::read(&file).unwrap();

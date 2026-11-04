@@ -252,6 +252,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                 ctx.copy_text(body);
                 ctx.open_url(egui::OpenUrl::new_tab(url));
                 draft.opened_github = true;
+                super::keep_copy(app, draft);
                 ctx.request_repaint();
             }
         }

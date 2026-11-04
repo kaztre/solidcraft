@@ -1108,6 +1108,8 @@ fn main() -> eframe::Result {
             mark("fonts");
             let dialog_folder = DialogFolder::default();
             let mut app = SolveApp::new(Session::default(), services(cc, &dialog_folder));
+            // Opening a report on GitHub also keeps a copy here (solidcraft_engine::bug_report).
+            app.issue_report.dir = solidcraft_engine::bug_report::default_dir();
             app.apply_off_thread = Some(solidcraft_ui_egui::dialogs::APPLY_AT_ONCE);
             app.custom_titlebar = custom_titlebar;
             #[cfg(target_os = "windows")]
