@@ -86,6 +86,10 @@ STEP and IGES part there as a SolidCraft part, as above, one after another besid
 can keep working; **Stop** ends it after the part in hand. Parts already converted are left alone,
 so converting again carries on where it stopped. At the end the window lists the parts that
 couldn't be converted and why (a file over the 512 MB import limit, a file SolidCraft can't read).
+A solid whose faces SolidCraft can't make into a solid, nor sew together, still comes in: as a
+surface body of the file's own faces, each its own sheet. It looks and measures as the part does
+and can be placed and linked, but it can't be filleted, shelled or cut; the import's notes say
+which solid and why.
 
 Converting downloads every file a synced folder keeps only in the cloud, and large assemblies take
 minutes each, so try one category first.

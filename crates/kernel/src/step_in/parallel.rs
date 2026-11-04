@@ -257,12 +257,108 @@ fn surface_part(ex: &Exchange, item: u64, units: Units, refused: Failure) -> std
             Err(e) => notes.push(Note::LeftOut(format!("left out: {}", e.to_string().trim_start_matches("the operation failed: ")))),
         }
     }
-    // Where SMLib cannot stitch them either, the solid is refused with the reason it was.
-    let part = stitched_part(&pieces, faces.len(), &refused.msg).map_err(|e| {
-        log::debug!(target: "step", "item #{item}: its faces not stitched ({e})");
-        refused
-    })?;
+    // Where SMLib cannot stitch them either, the faces that read alone come in as they are, each
+    // its own sheet in one surface body, so the part is still there to see, place and measure;
+    // only when not one face reads is the solid refused, with the reason it was.
+    let part = match stitched_part(&pieces, faces.len(), &refused.msg) {
+        Ok(part) => part,
+        Err(e) => {
+            log::debug!(target: "step", "item #{item}: its faces not stitched ({e})");
+            unsewn_part(&pieces, faces.len(), &refused.msg).map_err(|e| {
+                log::debug!(target: "step", "item #{item}: its faces not kept unsewn either ({e})");
+                refused
+            })?
+        }
+    };
     Ok((part, notes))
+}
+
+/// The one-face surface bodies `pieces` (each with its file face) as one surface body, each face
+/// its own sheet, not sewn to the others: the last resort for a solid whose faces neither make a
+/// B-rep nor stitch. It shows and measures as the file's faces do; edges two faces share are
+/// there twice.
+fn unsewn_part(pieces: &[(u64, Body)], file_faces: usize, refused: &str) -> crate::Result<Part> {
+    if pieces.is_empty() {
+        return Err(KernelError::Failed("no face read".into()));
+    }
+    let record = disjoint_union(pieces.iter().map(|(_, b)| b.record()))?;
+    let body = Body::from_record(record)?;
+    if body.face_count() != pieces.len() {
+        return Err(KernelError::Failed("the faces kept are not the faces read".into()));
+    }
+    let face_origin = pieces.iter().map(|(face, _)| *face).collect();
+    Ok(Part { body, closed: false, file_faces, face_origin, refused: Some(format!("{refused}; its faces are kept unjoined")) })
+}
+
+/// `records` side by side in one record: their regions' shells all in the infinite region (a
+/// bounded region of one stays its own), every index moved past the records before it.
+fn disjoint_union<'a>(records: impl IntoIterator<Item = &'a solidcore_record::brep::Brep>) -> crate::Result<solidcore_record::brep::Brep> {
+    use solidcore_record::brep::{Brep, Loop, Region, Shell};
+    let mut out: Option<Brep> = None;
+    for r in records {
+        let Some(o) = out.as_mut() else {
+            out = Some(r.clone());
+            continue;
+        };
+        let (so, fo, eo, vo) = (o.shells.len() as u32, o.faces.len() as u32, o.edges.len() as u32, o.vertices.len() as u32);
+        o.tolerance = o.tolerance.max(r.tolerance);
+        for (i, region) in r.regions.iter().enumerate() {
+            let shells: Vec<u32> = region.shells.iter().map(|s| s + so).collect();
+            match (i, o.regions.first_mut()) {
+                (0, Some(infinite)) => infinite.shells.extend(shells),
+                _ => o.regions.push(Region { shells, void: region.void }),
+            }
+        }
+        o.shells.extend(r.shells.iter().map(|shell| match shell {
+            Shell::Faces { faces, wires } => Shell::Faces {
+                faces: faces.iter().map(|f| solidcore_record::brep::OrientedFace { face: f.face + fo, forward: f.forward }).collect(),
+                wires: wires.iter().map(|w| w + eo).collect(),
+            },
+            Shell::Wire { edges } => Shell::Wire { edges: edges.iter().map(|e| e + eo).collect() },
+            Shell::Vertex { vertex } => Shell::Vertex { vertex: vertex + vo },
+        }));
+        o.faces.extend(r.faces.iter().map(|f| {
+            let mut f = f.clone();
+            for l in &mut f.loops {
+                match l {
+                    Loop::Edges { edges } => edges.iter_mut().for_each(|e| e.edge += eo),
+                    Loop::Vertex { vertex } => *vertex += vo,
+                }
+            }
+            f
+        }));
+        o.edges.extend(r.edges.iter().map(|e| {
+            let mut e = e.clone();
+            e.vertices = e.vertices.map(|v| v + vo);
+            e.uses.iter_mut().for_each(|u| u.face += fo);
+            e
+        }));
+        o.vertices.extend(r.vertices.iter().cloned());
+    }
+    let mut out = out.ok_or_else(|| KernelError::Failed("no face read".into()))?;
+    // A record holds at most MAX_SHELLS shells: past that, the infinite region's face shells are
+    // gathered into that many, each holding a run of consecutive unjoined sheets (so the faces
+    // stay in the order the shells list them).
+    let max = solidcore_record::brep::MAX_SHELLS;
+    if out.shells.len() > max && out.regions.len() == 1 {
+        let per = out.shells.len().div_ceil(max);
+        let groups = out.shells.len().div_ceil(per);
+        let mut gathered: Vec<Shell> = (0..groups).map(|_| Shell::Faces { faces: Vec::new(), wires: Vec::new() }).collect();
+        for (i, shell) in std::mem::take(&mut out.shells).into_iter().enumerate() {
+            match (shell, gathered.get_mut(i / per)) {
+                (Shell::Faces { faces, wires }, Some(Shell::Faces { faces: into, wires: wires_into })) => {
+                    into.extend(faces);
+                    wires_into.extend(wires);
+                }
+                _ => return Err(KernelError::Failed("a part of more than a thousand sheets that are not all faces".into())),
+            }
+        }
+        out.shells = gathered;
+        if let Some(infinite) = out.regions.first_mut() {
+            infinite.shells = (0..groups as u32).collect();
+        }
+    }
+    Ok(out)
 }
 
 /// The one-face surface bodies `pieces` (each with its file face) stitched by SMLib into one
@@ -302,4 +398,44 @@ pub(super) fn bodies(ex: &Exchange, jobs: &[Job], workers: usize) -> Vec<Prepare
             .collect();
     }
     jobs.iter().map(|job| prepare(ex, job)).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    use solidcore_record::Vec3;
+
+    #[test]
+    fn records_side_by_side_keep_every_face_and_their_regions() {
+        let a = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let b = crate::box_solid(Vec3::new(20.0, 0.0, 0.0), Vec3::new(30.0, 5.0, 5.0)).unwrap();
+        let both = Body::from_record(disjoint_union([a.record(), b.record()]).unwrap()).unwrap();
+        assert_eq!(both.face_count(), 12);
+        let volume = both.volume_at(1e-6).unwrap();
+        assert!((volume - 1250.0).abs() < 1e-6, "{volume}");
+    }
+
+    #[test]
+    fn faces_that_do_not_stitch_are_kept_unjoined_even_past_the_shell_limit() {
+        // One-face sheets apart from each other, more than a record's shell limit of them.
+        let n = solidcore_record::brep::MAX_SHELLS + 6;
+        let pieces: Vec<(u64, Body)> = (0..n)
+            .map(|i| {
+                let x = 2.0 * i as f64;
+                let square = solidcore_record::Loop2::polygon(&[
+                    solidcore_record::Vec2::new(x, 0.0),
+                    solidcore_record::Vec2::new(x + 1.0, 0.0),
+                    solidcore_record::Vec2::new(x + 1.0, 1.0),
+                    solidcore_record::Vec2::new(x, 1.0),
+                ]);
+                let region = solidcore_record::Region2 { outer: square, holes: Vec::new() };
+                (i as u64, crate::surfaces::patch_region(&solidcore_record::Plane::XY, &region).unwrap())
+            })
+            .collect();
+        let part = unsewn_part(&pieces, n, "why").unwrap();
+        assert_eq!((part.body.face_count(), part.closed), (n, false));
+        assert_eq!(part.face_origin, (0..n as u64).collect::<Vec<_>>());
+        assert!(part.refused.unwrap().contains("unjoined"));
+    }
 }
