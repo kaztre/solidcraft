@@ -98,7 +98,8 @@ minutes each, so try one category first.
 files beside them, with this release's import: parts converted by an earlier release get today's
 geometry and their picture, and open faster. Each part keeps its file name (a `.solidcraft` part
 stays `.solidcraft`), part number, description and revision, so the designs that link it still
-find it and offer **Update**. A part with no CAD file beside it is left as it is.
+find it and offer **Update**. A part with no CAD file beside it is left as it is, and so is a part
+someone has added features to since it was converted: it is listed with the reason.
 
 ## Pictures
 

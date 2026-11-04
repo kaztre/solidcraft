@@ -126,8 +126,14 @@ fn convert(_s: &mut Session, p: &Value) -> Result<Value> {
         .iter()
         .map(|ext| source.with_file_name(format!("{stem}.{ext}")).to_string_lossy().into_owned())
         .find(|there| solidcraft_io::vfs::design_path_is_file(there, None) == Some(true));
+    let reconverting = existing.is_some();
     let out = match existing {
         Some(there) if !flag(cmd, p, "overwrite")? => return Err(bad(cmd, format!("{there} already exists"))),
+        // Made again only while it is still what converting made (its CAD file's import, and the
+        // move that stood it up): a part someone has worked on is left as it is.
+        Some(there) if !only_converted(&there) => {
+            return Err(bad(cmd, format!("{there} has been changed since it was converted (it has features of its own), so it is left as it is")));
+        }
         Some(there) => there,
         None => {
             let out = source.with_file_name(format!("{stem}.{}", solidcraft_io::DESIGN_EXT));
@@ -170,8 +176,23 @@ fn convert(_s: &mut Session, p: &Value) -> Result<Value> {
     let bodies = world.bodies.len();
     world.warm_display_at(solidcraft_doc::display_quality::DisplayQuality::Normal, || true);
     part.execute("file.save", &json!({"path": out}))?;
+    // Made again from its CAD file, the part keeps no `.bak`: the file it replaced was that
+    // file's import too, and Reconvert would leave one beside every part of a library.
+    if reconverting {
+        let _ = std::fs::remove_file(solidcraft_io::backup_path(std::path::Path::new(&out)));
+    }
     let reply = PartsConvertReply { file: out, name, bodies: bodies as u64, stood_up, exporter_up };
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
+
+/// Whether the design at `path` holds only what converting a CAD file makes: Import features, and
+/// the Move that stood it up. Unreadable: no.
+fn only_converted(path: &str) -> bool {
+    use solidcraft_doc::FeatureKind;
+    solidcraft_io::vfs::read_design_path(path, None, solidcraft_io::limits::max_design_bytes())
+        .ok()
+        .and_then(|bytes| solidcraft_io::read_design(&bytes).ok())
+        .is_some_and(|doc| doc.features.iter().all(|f| matches!(f.kind, FeatureKind::Import { .. } | FeatureKind::Move { .. })))
 }
 
 #[cfg(test)]
@@ -258,6 +279,16 @@ mod tests {
         let doc = solidcraft_io::read_design(&std::fs::read(&legacy).unwrap()).unwrap();
         assert_eq!(doc.metadata.0.get("revision"), Some(&json!("B")));
         assert!(solidcraft_io::read_design_thumbnail(&std::fs::read(&legacy).unwrap()).is_some(), "with its picture");
+        assert!(!solidcraft_io::backup_path(&legacy).exists(), "no .bak beside a part made again");
+        // A part someone added a feature to is left as it is.
+        let mut edited = Session::default();
+        edited.execute("doc.open", &json!({"path": legacy.to_str().unwrap()})).unwrap();
+        edited.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        edited.execute("file.save", &json!({"path": legacy.to_str().unwrap()})).unwrap();
+        let kept = std::fs::read(&legacy).unwrap();
+        let refused = s.execute("library.parts.convert", &json!({"path": step.to_str().unwrap(), "overwrite": true}));
+        assert!(refused.unwrap_err().to_string().contains("changed since it was converted"));
+        assert_eq!(std::fs::read(&legacy).unwrap(), kept, "untouched");
         for bad in [json!({}), json!({"path": dir.join("notes.pdf").to_str().unwrap()}), json!({"path": step.to_str().unwrap(), "stand_up": "yes"})] {
             assert!(s.execute("library.parts.convert", &bad).is_err(), "{bad}");
         }
