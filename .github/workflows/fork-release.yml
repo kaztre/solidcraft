@@ -57,18 +57,13 @@ jobs:
   # The app icon in every size, for the Windows job.
   icons:
     needs: version
-    # SMLib's Linux library needs glibc >= 2.38 (__isoc23_sscanf and friends), so the Linux
-    # jobs run on 24.04, not release.yml's 22.04; the packages then need glibc >= 2.39.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: fork-release-icons
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - run: cargo build --release --locked -p solidcraft-cli
       - run: |
           . packaging/env.sh
@@ -87,7 +82,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: x86_64, runner: ubuntu-24.04, deb: amd64 }
+          - { arch: x86_64, runner: ubuntu-22.04, deb: amd64 }
     env:
       SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
       SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
@@ -105,9 +100,6 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: fork-release-linux-${{ matrix.arch }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - name: Build and package (AppImage, deb, rpm, tar.gz)
         run: packaging/linux/package.sh
       - name: Check the packages
@@ -145,9 +137,6 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: fork-release-macos-${{ matrix.arch }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh ${{ matrix.target }}
       - name: Build
         run: packaging/macos/package.sh --build-only ${{ matrix.target }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -218,27 +207,6 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: fork-release-windows-x64
-      # SMLib's prebuilt Windows library expects the C runtime as a DLL (/MD), but the packages
-      # link it statically (+crt-static, packaging/windows/package.ps1), so the prebuilt doesn't
-      # link. Compiled from source here instead, where cc follows crt-static (/MT).
-      - name: Fetch SMLib sources (crates/smlib/SMLIB_REV)
-        # PowerShell, not Git Bash: Git Bash turns the sparse-checkout paths (/capi/,
-        # /source/SMLib/) into Windows paths and checks out nothing. The same steps as
-        # scripts/fetch-smlib.sh --source.
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          $rev = (Get-Content crates/smlib/SMLIB_REV -Raw).Trim()
-          $dest = "target/smlib-$($rev.Substring(0, 12))"
-          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$dest-prebuilt/x86_64-pc-windows-msvc", $dest
-          git init -q $dest
-          git -C $dest remote add origin https://github.com/tangency-labs/smlib.git
-          git -C $dest sparse-checkout set --no-cone /source/SMLib/ /source/SM_API/ /capi/ /LICENSE
-          git -C $dest fetch -q --depth 1 --filter=blob:none origin $rev
-          git -C $dest checkout -q FETCH_HEAD
-          if (-not (Test-Path "$dest/capi/include/smlib.h")) { throw "SMLib sources $rev are not in $dest" }
-          Write-Output "SMLib sources $rev at $dest"
       - name: Install WiX
         shell: pwsh
         run: |
@@ -292,7 +260,7 @@ jobs:
             echo
             echo "- Mac: \`solidcraft-macos-universal.dmg\`"
             echo "- Windows: \`solidcraft-windows-x64.msi\`"
-            echo "- Linux: \`solidcraft-linux-x86_64.AppImage\` (make it executable, then run it; Ubuntu 24.04 or newer)"
+            echo "- Linux: \`solidcraft-linux-x86_64.AppImage\` (make it executable, then run it)"
             echo
             echo "\`SHA256SUMS.txt\` is for the app's own update check; you don't need it."
             echo

@@ -74,8 +74,8 @@ fixed names always fetch the newest build:
 - Linux: `https://github.com/kaztre/solidcraft/releases/latest/download/solidcraft-linux-x86_64.AppImage`
 
 The AppImage runs on any distribution (make it executable, then run it) and updates itself in
-place. It is built on Ubuntu 24.04 (SMLib's Linux library needs glibc 2.38 or newer), so it needs
-Ubuntu 24.04, Fedora 40, Debian 13 or newer. There is no ARM Linux build; Windows is x64 only, and
+place. It is built on Ubuntu 22.04, as upstream's releases are, so it runs on Ubuntu 22.04 and
+newer distributions. There is no ARM Linux build; Windows is x64 only, and
 the macOS dmg runs on both Apple silicon and Intel Macs.
 
 Until the fork has the Apple secrets ("Mac signing" below), the Mac app is only ad-hoc signed.
