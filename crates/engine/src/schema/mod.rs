@@ -88,6 +88,7 @@ pub mod surface_boundary;
 pub mod ui_prefs;
 pub mod versions;
 pub mod view_navigation;
+pub mod web;
 
 pub use check::{Contract, Issue, ParamCheck, TypedContract, input_schema_for, issues, output_schema_for, run_checked, run_checked_as};
 pub use types::*;

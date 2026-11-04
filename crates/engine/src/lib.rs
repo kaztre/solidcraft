@@ -22,6 +22,7 @@ pub mod frames;
 pub mod fuzz;
 pub mod helper;
 pub mod licences;
+pub mod net;
 pub mod occurrences;
 pub mod panels;
 pub mod params;

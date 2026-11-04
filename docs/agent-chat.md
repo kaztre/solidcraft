@@ -410,6 +410,30 @@ The agent reaches the open design only through SolidCraft's own tools (the
   an attached selection (and are shown the same way), and the box is empty again afterwards.
   **Cancel** keeps what was picked before.
 
+## The internet
+
+The assistant can look for a part online and bring it into the design: ask for "the Blue Robotics
+T200 thruster" and it reads the maker's page, finds the CAD download and inserts it.
+
+- **Reading pages.** Every agent can read a web page through SolidCraft (`web.fetch`): its text, its
+  links, and the links that are CAD files. Coding agents (Claude Code, Codex and others) also have
+  their own web search. A model behind Anthropic's own API (api.anthropic.com) gets Anthropic's
+  web search as well, billed to that key. Other endpoints, local models included, read pages but
+  have no search.
+- **Downloading.** `file.download` saves a STEP, IGES, STL, 3MF, OBJ or glTF file, or a vendor's zip of
+  them (only the CAD files are taken out), into the first Parts Library's **Downloads** folder,
+  else `Downloads/SolidCraft` in your home folder. A file never replaces another (`Part (2).step`).
+  The assistant's `download_cad` tool then makes each STEP or IGES file a library part (`.sc`,
+  beside it) and links it into the design; a mesh comes in as mesh bodies.
+- **You approve every download.** The panel asks first and shows the address and the site.
+  Reading a page needs no answer.
+- **Only public sites.** SolidCraft fetches `https://` addresses only, and never a name or address
+  on your computer or its network, nor one a link or redirect points there.
+- **Signing in.** A site that asks you to sign in before it gives the file (McMaster-Carr, for
+  example) shows that page instead; the assistant gives you the link to download it yourself.
+- **Off.** **Let the assistant use the internet** (Preferences → AI, on by default) turns all of this
+  off, Anthropic's web search included.
+
 ## Permissions
 
 Preferences → AI → **Permissions** decides what the agent may do without asking, for every agent;

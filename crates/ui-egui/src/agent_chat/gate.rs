@@ -130,6 +130,18 @@ pub fn command(id: &str, params: &Value, undo_left: usize) -> Verdict {
             Some(slicer) => format!("{question}, send to {}", slicer.chars().take(200).collect::<String>()),
             None => question,
         };
+    // Reading a web page changes nothing here (Preferences → AI turns the internet off).
+    if id == "web.fetch" {
+        return Verdict::Run { change: false };
+    }
+    // A file comes onto this computer from a stranger's site: the user sees which and says yes.
+    if id == "file.download" {
+        let shown = |k: &str| params.get(k).and_then(Value::as_str).map(|v| v.chars().take(200).collect::<String>());
+        let url = shown("url").unwrap_or_default();
+        let site = solidcraft_engine::net::check_url(&url).unwrap_or_else(|_| url.clone());
+        let into = shown("folder").unwrap_or_else(|| "the Downloads folder".to_string());
+        return Verdict::Ask(format!("{id}: download {url} from {site} into {into}"));
+    }
     // The model leaves the machine: the user is asked, whatever the agent says about consent.
     if id == "file.open_in_easyprint" {
         return Verdict::Ask(format!("{id}, upload the model to Printables' servers (EasyPrint)"));
@@ -256,6 +268,12 @@ mod tests {
     fn files_and_replacing_the_design_ask_first() {
         assert!(matches!(exec("file.save", json!({"path": "/tmp/a.solidcraft"})), Verdict::Ask(a) if a.contains("/tmp/a.solidcraft")));
         assert!(matches!(exec("file.new", json!({})), Verdict::Ask(_)));
+        // A page is read; a download asks, naming the address, the site and the folder.
+        assert_eq!(exec("web.fetch", json!({"url": "https://bluerobotics.com/t200"})), Verdict::Run { change: false });
+        assert!(matches!(
+            exec("file.download", json!({"url": "https://bluerobotics.com/files/T200.zip"})),
+            Verdict::Ask(a) if a.contains("https://bluerobotics.com/files/T200.zip") && a.contains("from bluerobotics.com") && a.contains("Downloads")
+        ));
         assert!(matches!(exec("doc.open", json!({"path": "x.step"})), Verdict::Ask(_)));
         assert!(matches!(exec("file.export", json!({"path": "x.stl"})), Verdict::Ask(_)));
         // Any command given a file, whatever its area.

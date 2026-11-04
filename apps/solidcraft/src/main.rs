@@ -648,6 +648,83 @@ fn agent_http(r: &solidcraft_ui_egui::agent_chat::backend::HttpRequest) -> Resul
     Ok((status, body))
 }
 
+/// The assistant's way onto the internet (`solidcraft_engine::net`): an https GET with no cookies
+/// and no stored credentials. Redirects are followed by hand, at most five, each only to an
+/// address `net::check_url` allows, and every address a host's name resolves to must be public
+/// before it is asked, so no link or DNS answer reaches this computer or its network. The body is
+/// read up to `limit` bytes.
+fn web_get(url: &str, limit: usize) -> Result<solidcraft_engine::net::Fetched, String> {
+    use std::net::ToSocketAddrs;
+    use std::time::Duration;
+    let tls = ureq::tls::TlsConfig::builder()
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .unversioned_rustls_crypto_provider(std::sync::Arc::new(rustls::crypto::ring::default_provider()))
+        .build();
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .tls_config(tls)
+        .http_status_as_error(false)
+        .timeout_global(Some(Duration::from_secs(180)))
+        .timeout_connect(Some(Duration::from_secs(15)))
+        .user_agent(concat!("Mozilla/5.0 (compatible; SolidCraft/", env!("CARGO_PKG_VERSION"), ")"))
+        .max_redirects(0)
+        .build()
+        .into();
+    let mut at = url.to_string();
+    for _ in 0..6 {
+        let host = solidcraft_engine::net::check_url(&at)?;
+        let addresses: Vec<std::net::SocketAddr> = (host.as_str(), 443).to_socket_addrs().map_err(|e| format!("{host}: {e}"))?.collect();
+        if addresses.is_empty() || addresses.iter().any(|a| !solidcraft_engine::net::is_public(a.ip())) {
+            return Err(format!("{host} points at an address on this computer or its network"));
+        }
+        let mut response = agent.get(&at).header("Accept", "*/*").call().map_err(|e| format!("{host}: {e}"))?;
+        let status = response.status().as_u16();
+        let header = |name: &str| response.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_string);
+        if (300..400).contains(&status) {
+            let next = header("location").ok_or_else(|| format!("{host} redirected without saying where"))?;
+            at = if next.starts_with("https://") || next.starts_with("http://") {
+                next
+            } else if let Some(path) = next.strip_prefix('/').filter(|p| !p.starts_with('/')) {
+                format!("https://{host}/{path}")
+            } else {
+                return Err(format!("{host} redirected to an address SolidCraft doesn't follow"));
+            };
+            continue;
+        }
+        let content_type = header("content-type").map(|t| t.split(';').next().unwrap_or_default().trim().to_ascii_lowercase()).unwrap_or_default();
+        let file_name = header("content-disposition").and_then(|d| disposition_name(&d));
+        let body = response.body_mut().with_config().limit(limit as u64).read_to_vec().map_err(|e| format!("{host}: {e}"))?;
+        return Ok(solidcraft_engine::net::Fetched { status, url: at, content_type, file_name, body });
+    }
+    Err(format!("{url} redirected too many times"))
+}
+
+/// The file name a `Content-Disposition` header gives (`filename*=UTF-8''…` before `filename=`).
+fn disposition_name(header: &str) -> Option<String> {
+    let parts: Vec<&str> = header.split(';').map(str::trim).collect();
+    let value = |key: &str| parts.iter().find_map(|p| p.split_once('=').filter(|(k, _)| k.trim().eq_ignore_ascii_case(key)).map(|(_, v)| v.trim()));
+    if let Some(v) = value("filename*") {
+        let encoded = v.split_once("''").map_or(v, |(_, e)| e);
+        let bytes = encoded.as_bytes();
+        let mut out = Vec::with_capacity(bytes.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            let hex = |c: u8| (c as char).to_digit(16);
+            match (bytes[i], bytes.get(i + 1).copied().and_then(hex), bytes.get(i + 2).copied().and_then(hex)) {
+                (b'%', Some(h), Some(l)) => {
+                    out.push((h * 16 + l) as u8);
+                    i += 3;
+                }
+                (c, _, _) => {
+                    out.push(c);
+                    i += 1;
+                }
+            }
+        }
+        return Some(String::from_utf8_lossy(&out).into_owned()).filter(|n| !n.is_empty());
+    }
+    value("filename").map(|v| v.trim_matches('"').to_string()).filter(|n| !n.is_empty())
+}
+
 /// Open with EasyPrint: upload the model to Printables' import endpoint on a worker and answer on
 /// `done` with the address to open. Through [`agent_http`]: no redirects, a timeout, no cookies.
 fn easyprint_upload(name: &str, bytes: Vec<u8>, done: std::sync::mpsc::Sender<Result<String, String>>) {
@@ -898,6 +975,8 @@ fn main() -> eframe::Result {
     }
     // The app's own reads of files it did not make go to helpers.
     solidcraft_engine::helper::enable();
+    // The assistant reaches the internet through this app (Preferences → AI can turn it off).
+    solidcraft_engine::net::install(std::sync::Arc::new(web_get));
     mark("main");
     // On OCLP-patched Macs, wgpu picks a Metal Shading Language standard that the system's
     // compiler refuses (`invalid value 'metal3.2'`), because the patched OS reports a newer

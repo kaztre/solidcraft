@@ -69,6 +69,18 @@ fn new_session_id() -> String {
     format!("solidcraft-{t:x}-{n:x}-{:x}", std::process::id())
 }
 
+/// Anthropic's own web search, run on its servers (docs/agent-chat.md, "The internet"): the basic
+/// version every Claude model takes.
+const WEB_SEARCH_TOOL: &str = "web_search_20250305";
+
+/// Whether a request to `base_url` carries Anthropic's web search: Anthropic's own API only (an
+/// endpoint that only speaks its protocol would refuse a tool it doesn't know), and only while the
+/// user lets the assistant use the internet.
+fn web_search_here(base_url: &str) -> bool {
+    let host = base_url.trim().trim_start_matches("https://").split(['/', ':']).next().unwrap_or_default().to_ascii_lowercase();
+    host == "api.anthropic.com" && solidcraft_engine::net::allowed()
+}
+
 /// Whether `base_url` is an OpenCode Go endpoint: model requests to all of them
 /// carry `x-opencode-session` (the `zen/go` gateway and the per-model
 /// `inference/go/...` endpoints alike). The model list and connection test are
@@ -910,6 +922,8 @@ impl Worker {
         if (dropped || trimmed) && self.cfg.protocol == Protocol::Anthropic {
             drop_thinking(&mut self.history);
         }
+        // Rounds a paused server-side search may take up again in one turn.
+        let mut resumed = 0;
         // No cap on requests: Stop sets `cancel`, checked at the top of every round.
         loop {
             // The history as of here is complete (every tool call answered): a cancelled request
@@ -942,7 +956,12 @@ impl Worker {
             }
             self.history.push(reply.assistant);
             if reply.calls.is_empty() {
-                self.emit(Event::TurnEnded { reason: reply.stop.into() });
+                if reply.stop == "pause_turn" && resumed < 5 {
+                    resumed += 1;
+                    continue;
+                }
+                let reason = if reply.stop == "pause_turn" { "" } else { reply.stop };
+                self.emit(Event::TurnEnded { reason: reason.into() });
                 return;
             }
             // Anthropic takes every result of a round in one user message; OpenAI takes one
@@ -1203,8 +1222,12 @@ impl Worker {
                     "system": super::acp::SYSTEM_NOTE,
                     "messages": &self.history,
                 });
-                if !self.tools.is_empty() {
-                    body["tools"] = Value::Array(self.tools.clone());
+                let mut tools = self.tools.clone();
+                if web_search_here(&self.cfg.base_url) {
+                    tools.push(json!({"type": WEB_SEARCH_TOOL, "name": "web_search", "max_uses": 5}));
+                }
+                if !tools.is_empty() {
+                    body["tools"] = Value::Array(tools);
                 }
                 body
             }
@@ -1388,6 +1411,8 @@ fn stop_reason(reason: Option<&str>) -> &'static str {
     match reason {
         Some("max_tokens" | "length") => "max_tokens",
         Some("refusal" | "content_filter") => "refusal",
+        // Anthropic's own web search stopped a long turn part way: sent again, it goes on.
+        Some("pause_turn") => "pause_turn",
         _ => "",
     }
 }
@@ -1784,6 +1809,23 @@ pub fn test_endpoint(http: &HttpFn, base_url: &str, key: Option<&str>, model: &s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn anthropics_web_search_goes_to_anthropic_only_and_a_paused_turn_goes_on() {
+        assert!(web_search_here("https://api.anthropic.com"));
+        assert!(web_search_here("https://API.anthropic.com/v1/"));
+        for other in ["http://localhost:1234", "https://openrouter.ai/api/v1", "https://api.anthropic.com.evil.example", "https://opencode.ai/zen/go"]
+        {
+            assert!(!web_search_here(other), "{other}");
+        }
+        assert_eq!(stop_reason(Some("pause_turn")), "pause_turn");
+        let paused = anthropic_reply(&json!({
+            "stop_reason": "pause_turn",
+            "content": [{"type": "server_tool_use", "id": "srvtoolu_1", "name": "web_search", "input": {"query": "T200 STEP"}}],
+        }));
+        assert!(paused.calls.is_empty(), "a server-side search is not a tool the client runs");
+        assert_eq!(paused.assistant["content"][0]["type"], "server_tool_use", "kept for the next request");
+    }
 
     #[test]
     fn mcp_tools_become_function_tools_without_crash_reports() {

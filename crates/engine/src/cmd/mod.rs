@@ -129,6 +129,7 @@ mod surface_match;
 mod versions;
 mod view_dxf;
 mod view_navigation;
+mod web;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -348,6 +349,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(parts::COMMANDS.iter());
     v.extend(parts_library::COMMANDS.iter());
     v.extend(versions::COMMANDS.iter());
+    v.extend(web::COMMANDS.iter());
     v.extend(bom::COMMANDS.iter());
     v.extend(mass_properties::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());

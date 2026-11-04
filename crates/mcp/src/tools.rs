@@ -422,6 +422,34 @@ pub fn tool_definitions() -> Vec<Value> {
             Effect::Files,
         ),
         tool(
+            "web_fetch",
+            "Read a web page",
+            "Read a web page: its title, its text without markup, its links, and the links that name a CAD file or a zip              (`cad_links`). https:// addresses only, never one on the user's own network; needs the user's internet setting on              (Preferences → AI). Use it to find a part's CAD file on a maker's or supplier's site, then `download_cad` the link.              A site that wants the user to sign in shows that page instead: tell the user the address so they can download it.",
+            obj(
+                json!({
+                    "url": string("The page's https:// address"),
+                    "max_chars": {"type": "integer", "minimum": 1000, "maximum": 100000, "description": "Most characters of text (default 20000)"},
+                }),
+                &["url"],
+            ),
+            Effect::ReadOnly,
+        ),
+        tool(
+            "download_cad",
+            "Download and insert a CAD file",
+            "Download a CAD file (STEP, IGES, STL, 3MF, OBJ or glTF, or a zip holding them) from an https:// address into the              user's Downloads folder (a Parts Library's, when they have one) and, unless `insert` is false, insert each into the              open design: a STEP or IGES file becomes a library part (.sc, beside the download) linked as a component, a mesh is              inserted as mesh bodies. The user is asked first and sees the address. Returns the files saved and what was inserted.",
+            obj(
+                json!({
+                    "url": string("The file's https:// address (a link web_fetch listed in cad_links)"),
+                    "insert": {"type": "boolean", "description": "Insert the files into the open design (default true)"},
+                    "folder": string("Where to save, a full path (default the Downloads folder)"),
+                    "name": string("The name to save a single file under (default the site's)"),
+                }),
+                &["url"],
+            ),
+            Effect::Files,
+        ),
+        tool(
             "save",
             "Save the design",
             "Save the design to `path` or its current file (a design opened as .solidcraft keeps that name). New designs are .sc files. The default is a design container; a .json path selects plain JSON. Set format to container or json to override the path. \
@@ -934,6 +962,8 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         "redo" => exec(b, "edit.redo", json!({})),
         "new_design" => exec(b, "file.new", pick(a, &["name"])),
         "open" => exec(b, "doc.open", pick(a, &["path", "up", "names"])),
+        "web_fetch" => exec(b, "web.fetch", pick(a, &["url", "max_chars"])),
+        "download_cad" => download_cad(b, a),
         "save" => exec(b, "file.save", pick(a, &["path", "format"])),
         other => Err(format!("unknown tool `{other}`")),
     }
@@ -1043,6 +1073,8 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
         "save" => mapped("file.save", pick(a, &["path", "format"])),
         "open" => mapped("doc.open", pick(a, &["path", "up", "names"])),
         "new_design" => mapped("file.new", pick(a, &["name"])),
+        "web_fetch" => mapped("web.fetch", pick(a, &["url", "max_chars"])),
+        "download_cad" => Err("`download_cad` is a tool, not a command: in a batch use file.download, then the insert commands".into()),
         "crash_reports" => match a.get("id") {
             Some(_) => mapped("diagnostics.crash_report", pick(a, &["id"])),
             None => mapped("diagnostics.crash_reports", pick(a, &["limit"])),
@@ -1067,6 +1099,7 @@ const TOOL_STEPS: &[&str] = &[
     "compare_picture",
     "crash_reports",
     "describe_command",
+    "download_cad",
     "execute",
     "export",
     "inspect_design",
@@ -1082,7 +1115,36 @@ const TOOL_STEPS: &[&str] = &[
     "set_parameter",
     "skill_reference",
     "undo",
+    "web_fetch",
 ];
+
+/// `download_cad`: `file.download`, then each file inserted unless `insert` is false: a STEP or
+/// IGES file made a library part (`library.parts.convert`, or the one already beside it) and
+/// linked (`component.insert_design`), a mesh inserted (`file.insert_mesh`). A file that can't be
+/// inserted is named in `errors`; the others still are.
+fn download_cad(b: &mut dyn Backend, a: &Map<String, Value>) -> Result<Value, String> {
+    let downloaded = exec(b, "file.download", pick(a, &["url", "folder", "name"]))?;
+    let mut inserted = Vec::new();
+    let mut errors = Vec::new();
+    if a.get("insert").and_then(Value::as_bool) != Some(false) {
+        for f in downloaded["files"].as_array().into_iter().flatten() {
+            let Some(file) = f["file"].as_str() else { continue };
+            let format = f["format"].as_str().unwrap_or_default();
+            let result = if matches!(format, "step" | "stp" | "igs" | "iges") {
+                exec(b, "library.parts.convert", json!({"path": file, "stand_up": true}))
+                    .and_then(|c| c["file"].as_str().map(str::to_string).ok_or_else(|| "the part was not saved".to_string()))
+                    .and_then(|design| exec(b, "component.insert_design", json!({"path": design})))
+            } else {
+                exec(b, "file.insert_mesh", json!({"path": file}))
+            };
+            match result {
+                Ok(v) => inserted.push(json!({"file": file, "result": v})),
+                Err(e) => errors.push(json!({"file": file, "error": e})),
+            }
+        }
+    }
+    Ok(json!({"downloaded": downloaded, "inserted": inserted, "errors": errors}))
+}
 
 /// `set_parameter`'s new value: `value` or `expression` (the parameters.change name), one of
 /// them, or both when they agree (`50` and `"50"` do).

@@ -2840,6 +2840,12 @@ impl SolveApp {
             resume_ui::after_long_pause(ctx);
         }
         frame_watch::begin(self);
+        // The assistant's internet (solidcraft_engine::net): allowed as Preferences → AI says,
+        // downloads into the first Parts Library's Downloads folder when there is one.
+        solidcraft_engine::net::set_allowed(self.preferences.ai_features && self.preferences.assistant_internet);
+        solidcraft_engine::net::set_downloads_dir(
+            self.preferences.parts_libraries.first().filter(|l| !l.folder.is_empty()).map(|l| std::path::Path::new(&l.folder).join("Downloads")),
+        );
         refused_part::next_frame(self, ctx);
         gpu::tick_tessellation(self);
         file_picker::tick(self, ctx);

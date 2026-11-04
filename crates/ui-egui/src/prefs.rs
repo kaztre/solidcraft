@@ -1483,6 +1483,10 @@ preference_settings! {
     /// Let AI agents connect: the localhost control channel (MCP) opens on the default port at
     /// start-up, unless `--control`/`SOLIDCRAFT_CONTROL_PORT` name one. Read at start-up.
     agent_control: bool = true, PAGE_ASSISTANT;
+    /// Let the assistant use the internet: read web pages (`web.fetch`) and download CAD files
+    /// (`file.download`, each one asked first), and an Anthropic endpoint's own web search
+    /// (docs/agent-chat.md, "The internet"). Off: none of these, whatever the agent asks.
+    assistant_internet: bool = true, PAGE_ASSISTANT;
     /// Add SolidCraft's MCP server to the AI apps installed on this computer at start-up
     /// ([`crate::ai_connect`]); off takes the entries out again.
     connect_ai_apps: bool = true, PAGE_ASSISTANT;
