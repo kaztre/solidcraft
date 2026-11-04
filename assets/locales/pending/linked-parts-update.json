@@ -61,5 +61,14 @@
     "ui.linked_not_now": "לא עכשיו",
     "ui.linked_update": "עדכון",
     "ui.linked_updating": "מעדכן את {names}: קובצי החלקים השתנו. ביטול מחזיר את הצורות הקודמות."
+  },
+  "vi": {
+    "prefs.linked_parts_auto_update": "Tự động cập nhật các chi tiết được liên kết đã thay đổi",
+    "prefs.linked_parts_auto_update_note": "Khi tệp của một chi tiết được liên kết thay đổi, hình dạng mới của nó được đưa ngay vào thiết kế đang mở, thành một bước mà Hoàn tác có thể đảo ngược. Các chi tiết từ một thư mục Thư viện chi tiết sẽ chờ đến khi bạn nhấn Cập nhật. Tắt: mọi chi tiết đã thay đổi đều chờ.",
+    "ui.linked_available": "Các chi tiết này đã thay đổi kể từ khi được đưa vào thiết kế này:",
+    "ui.linked_available_title": "Đã có bản cập nhật",
+    "ui.linked_not_now": "Để sau",
+    "ui.linked_update": "Cập nhật",
+    "ui.linked_updating": "Đang cập nhật {names}: các tệp chi tiết đã thay đổi. Hoàn tác sẽ đưa các hình dạng cũ trở lại."
   }
 }

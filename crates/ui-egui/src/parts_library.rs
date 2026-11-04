@@ -1067,7 +1067,7 @@ mod tests {
         h.step(&json!({"widget": "Insert Part"})).unwrap();
         wait(&mut h, |w| w.inserting.is_none());
         wait(&mut h, super::PartsLibrary::read);
-        let design = std::path::Path::new(&folder).join("THRUSTERS/T200_THRUSTER_BR-100545/T200.solidcraft");
+        let design = std::path::Path::new(&folder).join("THRUSTERS/T200_THRUSTER_BR-100545/T200.sc");
         assert!(design.is_file(), "the library part is saved beside the STEP");
         assert_eq!(h.app.session.doc.links.len(), 1, "and linked: {:?}", h.app.parts_library.as_ref().unwrap().note);
         let doc = solidcraft_engine::io::read_design(&std::fs::read(&design).unwrap()).unwrap();
@@ -1083,7 +1083,7 @@ mod tests {
         h.step(&json!({"widget": "Start Converting"})).unwrap();
         wait(&mut h, |w| w.converting.as_ref().is_some_and(|c| c.finished));
         wait(&mut h, super::PartsLibrary::read);
-        assert!(std::path::Path::new(&folder).join("THRUSTERS/T500_THRUSTER_BR-101092/T500.solidcraft").is_file());
+        assert!(std::path::Path::new(&folder).join("THRUSTERS/T500_THRUSTER_BR-101092/T500.sc").is_file());
         assert!(h.widget("Converted 1 of 1 parts.").is_some());
         let entries = &h.app.parts_library.as_ref().unwrap().libs[0].library.as_ref().unwrap().entries;
         assert!(entries.iter().all(|e| e.kind == super::Kind::Design));

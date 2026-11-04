@@ -34,7 +34,8 @@
     "ui.parts_library_saved_and_inserted": "Saved {name} as a SolidCraft part in the library and inserted it as a link.",
     "ui.parts_library_search": "Search by name, part number, vendor or category",
     "ui.parts_library_stand_up": "Stand up parts exported with Y up (SolidWorks)",
-    "ui.parts_library_stop": "Stop"
+    "ui.parts_library_stop": "Stop",
+    "help.library.parts.search": "Opens the Parts Library: browse and search folders of parts, and insert one into the design. Use it for parts you use again and again, such as fasteners, connectors and bought-in components."
   },
   "de": {
     "cmd.library.parts.convert": "In Bibliotheksteil umwandeln",
@@ -71,7 +72,8 @@
     "ui.parts_library_saved_and_inserted": "{name} wurde als SolidCraft-Teil in der Bibliothek gespeichert und als Verknüpfung eingefügt.",
     "ui.parts_library_search": "Nach Name, Teilenummer, Hersteller oder Kategorie suchen",
     "ui.parts_library_stand_up": "Mit Y nach oben exportierte Teile aufrichten (SolidWorks)",
-    "ui.parts_library_stop": "Anhalten"
+    "ui.parts_library_stop": "Anhalten",
+    "help.library.parts.search": "Öffnet die Teilebibliothek: Ordner mit Teilen durchsehen und durchsuchen und ein Teil in die Konstruktion einfügen. Für Teile, die Sie immer wieder verwenden, etwa Verbindungselemente, Steckverbinder und Zukaufteile."
   },
   "ja": {
     "cmd.library.parts.convert": "ライブラリ部品に変換",
@@ -108,7 +110,8 @@
     "ui.parts_library_saved_and_inserted": "{name} を SolidCraft 部品としてライブラリに保存し、リンクとして挿入しました。",
     "ui.parts_library_search": "名前、部品番号、メーカー、カテゴリーで検索",
     "ui.parts_library_stand_up": "Y 軸を上にして書き出された部品を立てる（SolidWorks）",
-    "ui.parts_library_stop": "停止"
+    "ui.parts_library_stop": "停止",
+    "help.library.parts.search": "部品ライブラリを開きます。部品のフォルダーを参照・検索して、部品をデザインに挿入できます。締結部品、コネクター、購入部品など、繰り返し使う部品に使います。"
   },
   "zh": {
     "cmd.library.parts.convert": "转换为库零件",
@@ -145,7 +148,8 @@
     "ui.parts_library_saved_and_inserted": "已将 {name} 作为 SolidCraft 零件保存到库中，并作为链接插入。",
     "ui.parts_library_search": "按名称、零件编号、供应商或类别搜索",
     "ui.parts_library_stand_up": "将以 Y 轴朝上导出的零件立起（SolidWorks）",
-    "ui.parts_library_stop": "停止"
+    "ui.parts_library_stop": "停止",
+    "help.library.parts.search": "打开零件库：浏览和搜索零件文件夹，并将零件插入设计。用于反复使用的零件，例如紧固件、连接器和外购件。"
   },
   "ko": {
     "cmd.library.parts.convert": "라이브러리 부품으로 변환",
@@ -182,7 +186,8 @@
     "ui.parts_library_saved_and_inserted": "{name}을(를) SolidCraft 부품으로 라이브러리에 저장하고 링크로 삽입했습니다.",
     "ui.parts_library_search": "이름, 부품 번호, 공급업체 또는 범주로 검색",
     "ui.parts_library_stand_up": "Y축이 위로 내보내진 부품 세우기 (SolidWorks)",
-    "ui.parts_library_stop": "중지"
+    "ui.parts_library_stop": "중지",
+    "help.library.parts.search": "부품 라이브러리를 엽니다. 부품 폴더를 둘러보고 검색하여 부품을 디자인에 삽입합니다. 체결 부품, 커넥터, 구매 부품처럼 반복해서 사용하는 부품에 사용합니다."
   },
   "ar": {
     "cmd.library.parts.convert": "تحويل إلى قطعة مكتبة",
@@ -219,7 +224,8 @@
     "ui.parts_library_saved_and_inserted": "حُفظت {name} كقطعة SolidCraft في المكتبة وأُدرجت كرابط.",
     "ui.parts_library_search": "ابحث بالاسم أو رقم القطعة أو المورّد أو الفئة",
     "ui.parts_library_stand_up": "إقامة القطع المصدّرة ومحور Y للأعلى (SolidWorks)",
-    "ui.parts_library_stop": "إيقاف"
+    "ui.parts_library_stop": "إيقاف",
+    "help.library.parts.search": "يفتح مكتبة القطع: تصفّح مجلدات القطع وابحث فيها، وأدرج قطعة في التصميم. استخدمه للقطع التي تستخدمها مرارًا وتكرارًا، مثل أدوات التثبيت والموصلات والمكونات المشتراة."
   },
   "he": {
     "cmd.library.parts.convert": "המרה לחלק ספרייה",
@@ -256,6 +262,45 @@
     "ui.parts_library_saved_and_inserted": "{name} נשמר כחלק SolidCraft בספרייה והוכנס כקישור.",
     "ui.parts_library_search": "חיפוש לפי שם, מספר חלק, ספק או קטגוריה",
     "ui.parts_library_stand_up": "הקמת חלקים שיוצאו עם Y למעלה (SolidWorks)",
-    "ui.parts_library_stop": "עצירה"
+    "ui.parts_library_stop": "עצירה",
+    "help.library.parts.search": "פתיחת ספריית החלקים: עיון וחיפוש בתיקיות של חלקים, והוספת חלק לתכנון. מתאים לחלקים שמשתמשים בהם שוב ושוב, כמו מחברים, קונקטורים ורכיבים קנויים."
+  },
+  "vi": {
+    "cmd.library.parts.convert": "Chuyển đổi thành chi tiết thư viện",
+    "cmd.library.parts.search": "Thư viện chi tiết",
+    "ui.parts_library_add": "Thêm thư viện…",
+    "ui.parts_library_all": "Tất cả thư viện",
+    "ui.parts_library_cad_hint": "Chi tiết STEP hoặc IGES được lưu thành chi tiết SolidCraft bên cạnh nó trong lần đầu tiên, rồi được liên kết.",
+    "ui.parts_library_cancel": "Hủy bỏ",
+    "ui.parts_library_choose_title": "Chọn thư mục thư viện chi tiết",
+    "ui.parts_library_col_folder": "Thư mục",
+    "ui.parts_library_col_name": "Tên",
+    "ui.parts_library_col_number": "Mã số chi tiết",
+    "ui.parts_library_col_type": "Loại",
+    "ui.parts_library_convert": "Chuyển đổi {count} thành chi tiết SolidCraft…",
+    "ui.parts_library_convert_explain": "Lưu {count} chi tiết STEP và IGES trong danh mục này thành chi tiết SolidCraft bên cạnh chúng, kèm hình ảnh, để có thể liên kết. Các tệp chỉ có trong iCloud hoặc thư mục đám mây khác sẽ được tải về trước. Chi tiết lớn cần một lúc; bạn có thể tiếp tục làm việc và Dừng bất cứ lúc nào.",
+    "ui.parts_library_convert_start": "Bắt đầu chuyển đổi",
+    "ui.parts_library_converted": "Đã chuyển đổi {ok} trên {total} chi tiết.",
+    "ui.parts_library_converting": "Đang chuyển đổi {done} trên {total}: {name}",
+    "ui.parts_library_copied_instead": "Không thể lưu {name} vào thư viện ({reason}), nên một bản sao đã được chèn thay thế.",
+    "ui.parts_library_count": "{shown} trên {total} chi tiết",
+    "ui.parts_library_design_hint": "Đã chèn dưới dạng liên kết: khi chi tiết thư viện thay đổi, Cập nhật liên kết sẽ đưa thay đổi đó vào thiết kế này.",
+    "ui.parts_library_failed": "Không thể chuyển đổi {count} chi tiết:",
+    "ui.parts_library_grid": "Hình ảnh",
+    "ui.parts_library_insert": "Chèn chi tiết",
+    "ui.parts_library_inserted": "Đã chèn {name}.",
+    "ui.parts_library_list": "Danh sách",
+    "ui.parts_library_no_match": "Không có chi tiết nào khớp với tìm kiếm của bạn.",
+    "ui.parts_library_none": "Thêm thư viện: chọn một thư mục chứa chi tiết. Các thư mục bên trong sẽ trở thành danh mục của thư viện.",
+    "ui.parts_library_preparing": "Đang lưu {name} thành chi tiết SolidCraft trong thư viện…",
+    "ui.parts_library_reading": "Đang đọc thư viện…",
+    "ui.parts_library_refresh": "Làm mới",
+    "ui.parts_library_remove": "Gỡ thư viện",
+    "ui.parts_library_remove_hint": "Gỡ thư viện đã chọn khỏi danh sách này. Các tệp của nó vẫn ở nguyên chỗ cũ.",
+    "ui.parts_library_saved_and_inserted": "Đã lưu {name} thành chi tiết SolidCraft trong thư viện và chèn nó dưới dạng liên kết.",
+    "ui.parts_library_search": "Tìm theo tên, mã số chi tiết, nhà cung cấp hoặc danh mục",
+    "ui.parts_library_stand_up": "Dựng đứng các chi tiết được xuất với trục Y hướng lên (SolidWorks)",
+    "ui.parts_library_stop": "Dừng",
+    "help.library.parts.search": "Mở Thư viện chi tiết: duyệt và tìm kiếm các thư mục chi tiết, rồi chèn một chi tiết vào thiết kế. Dùng cho những chi tiết bạn dùng đi dùng lại, như chi tiết kẹp chặt, đầu nối và linh kiện mua ngoài."
   }
 }

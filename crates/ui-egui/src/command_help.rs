@@ -99,6 +99,7 @@ pub const DOCUMENTED: &[&str] = &[
     "library.apply",
     "library.export",
     "library.inspect",
+    "library.parts.search",
     "material.assign",
     "material.properties.validate",
     "mesh.convert",
