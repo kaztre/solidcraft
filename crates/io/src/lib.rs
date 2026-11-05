@@ -21,6 +21,7 @@ pub use design::{
     write_design_container, write_design_container_with_cache, write_design_container_with_compression, write_design_container_with_preview,
     write_design_container_with_thumbnail, write_drawing_container,
 };
+pub mod kicad;
 mod legacy_dir;
 pub mod limits;
 #[cfg(test)]
@@ -34,6 +35,7 @@ mod ply_complex;
 pub use ply::{ply_counts, read_ply_mesh};
 mod point_cloud;
 pub use point_cloud::{CloudFile, DEFAULT_MAX_POINTS, MAX_POINT_CLOUD_BYTES, is_ply_path, is_point_cloud_path, read_point_cloud};
+pub mod project;
 pub mod safe_write;
 mod sketch2d;
 mod svg;

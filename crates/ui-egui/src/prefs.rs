@@ -1487,6 +1487,11 @@ preference_settings! {
     /// (`file.download`, each one asked first), and an Anthropic endpoint's own web search
     /// (docs/agent-chat.md, "The internet"). Off: none of these, whatever the agent asks.
     assistant_internet: bool = true, PAGE_ASSISTANT;
+    /// Let the assistant read the project folder of the design in front: the folder that keeps
+    /// its versions, else its own (`project.files`, `project.search`, `project.read`; an agent
+    /// installed on this computer starts in it). Off: none of these, and agents start in
+    /// SolidCraft's own working folder (docs/agent-chat.md, "The project folder").
+    assistant_project: bool = true, PAGE_ASSISTANT;
     /// Add SolidCraft's MCP server to the AI apps installed on this computer at start-up
     /// ([`crate::ai_connect`]); off takes the entries out again.
     connect_ai_apps: bool = true, PAGE_ASSISTANT;

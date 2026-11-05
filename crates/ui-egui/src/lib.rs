@@ -452,6 +452,9 @@ pub struct Services {
     /// host has no such dialog.
     pub pick_folder: Option<Box<dyn Fn(&str) -> FilePickerFuture>>,
     pub show_in_folder: Option<Box<dyn Fn(&str)>>,
+    /// Open a file in the program the system opens it with (a PDF in its viewer, a KiCad file in
+    /// KiCad); `None` where the host can't.
+    pub open_file: Option<Box<dyn Fn(&str)>>,
     /// Where the host reads the anti-aliasing preference at start (a small JSON file).
     pub graphics_path: Option<String>,
     /// Linux: the window system this run uses, `wayland` or `x11` (Preferences shows it, #3083).
@@ -2419,6 +2422,29 @@ impl SolveApp {
         self.ui.perspective
     }
 
+    /// The project folder of the design in front: the innermost folder keeping its versions, else
+    /// the folder it is saved in; `None` for a design not saved yet.
+    pub fn project_folder(&self) -> Option<std::path::PathBuf> {
+        type Found = (Option<String>, Vec<String>, Option<std::path::PathBuf>);
+        // Worked out again only when the design or the Versions folders change: it looks at the
+        // folders above the design.
+        static LAST: std::sync::Mutex<Option<Found>> = std::sync::Mutex::new(None);
+        let path = self.session.path.clone();
+        let versioned = &self.preferences.versions_folders;
+        let Ok(mut last) = LAST.lock() else {
+            return path.as_deref().and_then(|p| solidcraft_engine::project::folder_of(p, versioned));
+        };
+        if let Some((p, v, found)) = last.as_ref()
+            && *p == path
+            && v == versioned
+        {
+            return found.clone();
+        }
+        let found = path.as_deref().and_then(|p| solidcraft_engine::project::folder_of(p, versioned));
+        *last = Some((path, versioned.clone(), found.clone()));
+        found
+    }
+
     pub fn set_status(&mut self, s: impl Into<String>, error: bool) {
         let (text, at) = (i18n::tr_diagnostic(&s.into()), now_ms());
         self.messages.push(&text, error, at);
@@ -2846,6 +2872,10 @@ impl SolveApp {
         solidcraft_engine::net::set_downloads_dir(
             self.preferences.parts_libraries.first().filter(|l| !l.folder.is_empty()).map(|l| std::path::Path::new(&l.folder).join("Downloads")),
         );
+        // The project folder the assistant reads (solidcraft_engine::project): the design in
+        // front's Versions folder, else its own folder.
+        solidcraft_engine::project::set_allowed(self.preferences.ai_features && self.preferences.assistant_project);
+        solidcraft_engine::project::set_folder(self.project_folder());
         refused_part::next_frame(self, ctx);
         gpu::tick_tessellation(self);
         file_picker::tick(self, ctx);

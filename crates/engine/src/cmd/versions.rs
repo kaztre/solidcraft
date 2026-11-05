@@ -39,7 +39,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&FOLDER_CONTRACT)
         .output(output_schema_for::<VersionsStatusReply>)
         .params(
-            "folder: a folder whose designs and STEP files keep versions → folder, tracked (false until versions.start), head?, \
+            "folder: a folder whose files keep versions → folder, tracked (false until versions.start), head?, \
              changes: [{path, change: added|changed|deleted, local}], files, truncated. Never changes anything",
         ),
     CommandSpec::new("versions.start", "Keep Versions of a Folder", crate::checked!("versions.start", start))
@@ -279,7 +279,7 @@ fn copy(_s: &mut Session, p: &Value) -> Result<Value> {
         Some(to) => {
             versions::check_path(to).map_err(failed(cmd))?;
             if !versions::is_kept(to) {
-                return Err(bad(cmd, "`to` must be a design or STEP file name"));
+                return Err(bad(cmd, "`to` must be a file name versions keep, not a lock, backup or temporary file"));
             }
             let dest = s.work.join(to);
             let note = format!("Copied from {path} ({})", versions::short(commit));

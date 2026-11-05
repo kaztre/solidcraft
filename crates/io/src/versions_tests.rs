@@ -51,17 +51,27 @@ fn a_part_is_checked_in_changed_and_put_back_to_its_first_version() {
     d.write("VENDOR/T200.STEP", "ISO-10303-21; t200");
     d.write("VENDOR/T200.stl", "solid mesh");
     d.write("VENDOR/datasheet.pdf", "pdf");
+    // Other programs' scratch, never kept.
+    d.write("VENDOR/~$datasheet.docx", "word's lock");
+    d.write("VENDOR/T200.STEP.bak", "backup");
+    d.write("ELECTRICAL/pod.kicad_prl", "window settings");
+    d.write("ELECTRICAL/_autosave-pod.kicad_sch", "autosave");
+    d.write("ELECTRICAL/pod-backups/pod-2026.zip", "backup");
+    d.write("ELECTRICAL/fp-info-cache", "cache");
+    d.write("node_modules/x/a.js", "build");
     let s = d.store();
     assert!(!s.exists());
     s.start().unwrap();
     assert!(s.exists());
-    // Only designs and STEP files are kept.
+    // Every file is kept, the scratch left out.
     assert_eq!(
         changes(&s),
         vec![
             ("PROJECTS/ROV/Frame plate.solidcraft".into(), Change::Added),
             ("PROJECTS/ROV/Thruster mount.solidcraft".into(), Change::Added),
             ("VENDOR/T200.STEP".into(), Change::Added),
+            ("VENDOR/T200.stl".into(), Change::Added),
+            ("VENDOR/datasheet.pdf".into(), Change::Added),
         ]
     );
     let all: Vec<String> = s.status().unwrap().changes.into_iter().map(|c| c.path).collect();
@@ -82,7 +92,7 @@ fn a_part_is_checked_in_changed_and_put_back_to_its_first_version() {
     assert!(!more);
     assert_eq!(log.iter().map(|e| e.commit.message.as_str()).collect::<Vec<_>>(), ["Thicker plate", "First parts"]);
     assert_eq!(log[0].files, vec![("PROJECTS/ROV/Frame plate.solidcraft".to_string(), Change::Changed)]);
-    assert_eq!(log[1].files.len(), 3);
+    assert_eq!(log[1].files.len(), 5);
     let (mount, _) = s.log(Some("PROJECTS/ROV/Thruster mount.solidcraft"), 10).unwrap();
     assert_eq!(mount.len(), 1, "the mount only changed in the first version");
     let (one, more) = s.log(None, 1).unwrap();
@@ -146,8 +156,8 @@ fn hostile_paths_ids_and_damaged_history_are_refused_without_panicking() {
         assert!(s.restore(&v.id, Some(bad)).is_err(), "{bad:?}");
     }
     assert!(s.check_in(&["Part.solidcraft".into()], "   ", &me(), 2).is_err(), "a message is required");
-    d.write("notes.txt", "x");
-    assert!(s.check_in(&["notes.txt".into()], "x", &me(), 2).is_err(), "only designs and STEP files");
+    d.write("Part.solidcraft.bak", "x");
+    assert!(s.check_in(&["Part.solidcraft.bak".into()], "x", &me(), 2).is_err(), "never a backup or lock file");
     for id in ["", "zz", "../../../../etc/passwd", &"A".repeat(40), &"0".repeat(40)] {
         assert!(s.read_commit(id).is_err(), "{id:?}");
         assert!(s.restore(id, None).is_err(), "{id:?}");

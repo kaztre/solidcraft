@@ -434,6 +434,8 @@ pub struct AgentChat {
     next_approval: u64,
     /// The chat's control endpoint: the port, and its requests.
     pub tools_port: Option<u16>,
+    /// The folder the running agent started in: the project folder, or the scratch folder.
+    pub(crate) started_in: Option<std::path::PathBuf>,
     tools_rx: Option<Receiver<ControlRequest>>,
     tools_tx: Option<Sender<ControlRequest>>,
     /// Settings → AI: the Add agent dialog and connection tests.
@@ -949,7 +951,20 @@ pub(crate) fn find_cli() -> Option<std::path::PathBuf> {
 
 /// The agent's working folder: an empty folder of SolidCraft's own, so an agent's own file tools
 /// (where it has them) see nothing of the user's.
-fn working_dir() -> std::path::PathBuf {
+/// The folder an agent starts in: the project folder of the design in front when the user lets
+/// the assistant read it (Preferences → AI), else SolidCraft's own working folder.
+fn working_dir(app: &SolveApp) -> std::path::PathBuf {
+    if app.preferences.ai_features
+        && app.preferences.assistant_project
+        && let Some(project) = app.project_folder().filter(|p| p.is_dir())
+    {
+        return project;
+    }
+    scratch_dir()
+}
+
+/// SolidCraft's own working folder for agents, for their scratch files.
+pub(super) fn scratch_dir() -> std::path::PathBuf {
     let d = solidcraft_engine::recovery::data_dir()
         .map(|d| d.join("agent-chat").join("work"))
         .unwrap_or_else(|| std::env::temp_dir().join("solidcraft-agent-chat"));
@@ -1010,7 +1025,10 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
     let bridge = cli.zip(chat.tools_port).map(|(cli, port)| acp::McpBridge { cli, port });
     chat.tools_available = Some(bridge.is_some());
     let wake = ctx.clone();
-    let start = backend::StartContext { cwd: working_dir(), bridge, tools: chat.tools_tx.clone(), wake: Box::new(move || wake.request_repaint()) };
+    let cwd = working_dir(app);
+    app.agent_chat.started_in = Some(cwd.clone());
+    let chat = &mut app.agent_chat;
+    let start = backend::StartContext { cwd, bridge, tools: chat.tools_tx.clone(), wake: Box::new(move || wake.request_repaint()) };
     let started: Result<Box<dyn ChatBackend>, String> = match entry.kind {
         agents::Kind::Acp if entry.argv.is_empty() => Err(tr("ui.agent_chat_none_found").to_string()),
         agents::Kind::Acp => acp_client::AcpBackend::start(&entry.argv, start).map(|b| Box::new(b) as Box<dyn ChatBackend>),
@@ -1809,11 +1827,16 @@ fn pump_tools(app: &mut SolveApp) {
         };
         req.chat_turn = Some(Arc::clone(&turn.active));
         turn.requests += 1;
-        // Requests without folders of their own stay inside the chat's working folder.
+        // Requests without folders of their own stay inside the chat's working folders: its
+        // scratch folder, and the project folder it started in.
         if let Some(o) = req.params.as_object_mut()
             && !o.contains_key("allow_paths")
         {
-            o.insert("allow_paths".into(), json!([working_dir().to_string_lossy()]));
+            let mut allowed = vec![scratch_dir().to_string_lossy().into_owned()];
+            if let Some(started) = app.agent_chat.started_in.as_ref().filter(|d| **d != scratch_dir()) {
+                allowed.push(started.to_string_lossy().into_owned());
+            }
+            o.insert("allow_paths".into(), json!(allowed));
         }
         let undo_left = undo_len.saturating_sub(turn.start_undo);
         // The permission mode (the agent's own, else the global one) and "always allow" answers.

@@ -27,7 +27,7 @@ description: "Use when someone asks how to set up or use a parts library, insert
 
 ## Facts to get right
 - The history is kept on this computer, outside the folder, so iCloud or Google Drive syncing can't damage it. Sharing with a team through GitHub isn't built yet; say so if asked.
-- Only designs and STEP files are kept; meshes, PDFs and drawings are ignored.
+- Every file in the folder is kept (designs, STEP, PDF drawings, KiCad projects, documents); lock, backup and temporary files, KiCad `-backups` folders and `.kicad_prl` are left out. The assistant reads the same folder (`project_files`, `project_search`, `project_read`).
 - A part only in iCloud shows "in iCloud"; checking it in downloads it.
 - Library parts never change an assembly unasked; project parts do.
 

@@ -50,6 +50,10 @@ or face and follows it when parameters change.\n\n\
 Parts from the internet: to bring in a bought-in part (a thruster, connector, motor or fastener), find the maker's page \
 with `web_fetch` (and your own web search if you have one), then `download_cad` the STEP link it lists among its CAD links; the \
 user approves each download. A site that wants a sign-in shows that page instead: give the user the address.\n\n\
+The project: the design's project folder also holds its other documents (electrical drawings as PDF, KiCad schematics and \
+boards, notes, datasheets). Before answering a question about the project, call `project_files` and read its brief \
+(PROJECT.md) with `project_read`; find things with `project_search` (a reference such as J3, a part number, a net). These \
+only read. Say which file an answer came from.\n\n\
 Parts libraries and versions: when someone asks how to use a parts library or keep versions of their parts (check in, \
 history, revisions, going back), read `skill_reference` for solidcraft-parts and teach them the buttons one step \
 at a time.\n\n\

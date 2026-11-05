@@ -34,6 +34,8 @@ encoding_rs = { workspace = true }
 cadmpeg-core = { workspace = true }
 cadmpeg-ir = { workspace = true }
 cadmpeg-registry = { workspace = true }
+# Text of the PDFs in a project folder, for the assistant (src/project.rs).
+pdf-extract = { workspace = true }
 
 # The model cache's key (build.rs).
 [build-dependencies]

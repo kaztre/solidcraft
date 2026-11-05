@@ -435,6 +435,56 @@ pub fn tool_definitions() -> Vec<Value> {
             Effect::ReadOnly,
         ),
         tool(
+            "project_files",
+            "List the project's files",
+            "List the files in the user's project folder: the folder that keeps versions of the design in front, else the design's \
+             own folder. The project holds the design's parts and its other documents (electrical drawings as PDF, KiCad \
+             schematics and boards, notes, datasheets). Returns the project's name, `brief` (PROJECT.md or README.md: read it \
+             first, it says what the project is), and each file's path, kind and size. Reads only.",
+            obj(
+                json!({
+                    "path": string("A folder in the project (default all of it)"),
+                    "filter": string("Text in the name, or a kind: design, cad, mesh, pdf, kicad, text, word, office, picture"),
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 5000, "description": "Most files (default 500)"},
+                }),
+                &[],
+            ),
+            Effect::ReadOnly,
+        ),
+        tool(
+            "project_search",
+            "Search the project",
+            "Look for text in the project folder's file names and in its text and KiCad files (a part number, a reference such as \
+             J3, a net name, a word): each match's file, line and text. PDFs are not searched; read them with project_read.",
+            obj(
+                json!({
+                    "query": string("The text to look for, any case"),
+                    "path": string("A folder in the project (default all of it)"),
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "description": "Most matches (default 100)"},
+                }),
+                &["query"],
+            ),
+            Effect::ReadOnly,
+        ),
+        tool(
+            "project_read",
+            "Read a project file",
+            "Read one file in the project folder: a text file as it is, a PDF's text page by page, a Word file's paragraphs, a KiCad \
+             schematic or board as a summary (its parts with reference, value, symbol or footprint, fields such as MPN and place; \
+             sheets, labels, nets, layers and board outline; `raw: true` for its own text). Long files come in parts: call again \
+             with `offset` set to the reply's `next_offset`. A design or CAD file is opened or inserted instead.",
+            obj(
+                json!({
+                    "path": string("The file, as project_files lists it"),
+                    "offset": {"type": "integer", "minimum": 0, "description": "Characters to skip (a reply's next_offset)"},
+                    "max_chars": {"type": "integer", "minimum": 1000, "maximum": 100000, "description": "Most characters (default 20000)"},
+                    "raw": {"type": "boolean", "description": "A KiCad schematic or board as its own text (default false)"},
+                }),
+                &["path"],
+            ),
+            Effect::ReadOnly,
+        ),
+        tool(
             "download_cad",
             "Download and insert a CAD file",
             "Download a CAD file (STEP, IGES, STL, 3MF, OBJ or glTF, or a zip holding them) from an https:// address into the              user's Downloads folder (a Parts Library's, when they have one) and, unless `insert` is false, insert each into the              open design: a STEP or IGES file becomes a library part (.sc, beside the download) linked as a component, a mesh is              inserted as mesh bodies. The user is asked first and sees the address. Returns the files saved and what was inserted.",
@@ -963,6 +1013,9 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         "new_design" => exec(b, "file.new", pick(a, &["name"])),
         "open" => exec(b, "doc.open", pick(a, &["path", "up", "names"])),
         "web_fetch" => exec(b, "web.fetch", pick(a, &["url", "max_chars"])),
+        "project_files" => exec(b, "project.files", pick(a, &["path", "filter", "limit"])),
+        "project_search" => exec(b, "project.search", pick(a, &["query", "path", "limit"])),
+        "project_read" => exec(b, "project.read", pick(a, &["path", "offset", "max_chars", "raw"])),
         "download_cad" => download_cad(b, a),
         "save" => exec(b, "file.save", pick(a, &["path", "format"])),
         other => Err(format!("unknown tool `{other}`")),
@@ -1074,6 +1127,9 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
         "open" => mapped("doc.open", pick(a, &["path", "up", "names"])),
         "new_design" => mapped("file.new", pick(a, &["name"])),
         "web_fetch" => mapped("web.fetch", pick(a, &["url", "max_chars"])),
+        "project_files" => mapped("project.files", pick(a, &["path", "filter", "limit"])),
+        "project_search" => mapped("project.search", pick(a, &["query", "path", "limit"])),
+        "project_read" => mapped("project.read", pick(a, &["path", "offset", "max_chars", "raw"])),
         "download_cad" => Err("`download_cad` is a tool, not a command: in a batch use file.download, then the insert commands".into()),
         "crash_reports" => match a.get("id") {
             Some(_) => mapped("diagnostics.crash_report", pick(a, &["id"])),
@@ -1108,6 +1164,9 @@ const TOOL_STEPS: &[&str] = &[
     "new_design",
     "open",
     "pending",
+    "project_files",
+    "project_read",
+    "project_search",
     "redo",
     "running",
     "save",

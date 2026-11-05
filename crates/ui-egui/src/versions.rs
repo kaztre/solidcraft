@@ -1,5 +1,5 @@
 //! The Versions tab of the Browser panel (docs/versions.md): check-in, history, revisions and
-//! restore for the designs and STEP files in a folder, through the `versions.*` commands. It
+//! restore for the files in a project folder, through the `versions.*` commands. It
 //! follows the design in front: **This part** (or **This assembly**: the design and its linked
 //! parts in the folder) or **Whole folder**. A design outside every folder that keeps versions
 //! offers to keep versions of its folder. The commands run beside the window; the panel shows
@@ -105,6 +105,12 @@ fn relative(folder: &str, file: &str) -> Option<String> {
     let rest = Path::new(file).strip_prefix(folder).ok()?;
     let parts: Vec<String> = rest.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
     (!parts.is_empty()).then(|| parts.join("/"))
+}
+
+/// Does SolidCraft open this file itself: a design, a CAD file or a mesh?
+fn opens_here(file: &str) -> bool {
+    use solidcraft_engine::io::{is_design_path, is_mesh_path, is_step_path};
+    is_design_path(file) || is_step_path(file) || is_mesh_path(file)
 }
 
 /// The folder keeping versions that holds `file` (the innermost one).
@@ -290,7 +296,14 @@ fn done(app: &mut SolveApp, after: After, result: Result<Value, String>) {
         }
         After::Open | After::NewPart => {
             if let Some(file) = r["file"].as_str() {
-                app.open_path(file);
+                if opens_here(file) {
+                    app.open_path(file);
+                } else if let Some(open) = &app.services.open_file {
+                    // A drawing, document or KiCad file: in its own program.
+                    open(file);
+                } else if let Some(show) = &app.services.show_in_folder {
+                    show(file);
+                }
             }
             if matches!(after, After::NewPart) {
                 app.set_status(format("ui.versions_copied", &[("name", &file_name(r["file"].as_str().unwrap_or("")))]), false);

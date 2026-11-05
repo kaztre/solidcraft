@@ -130,6 +130,11 @@ pub fn command(id: &str, params: &Value, undo_left: usize) -> Verdict {
             Some(slicer) => format!("{question}, send to {}", slicer.chars().take(200).collect::<String>()),
             None => question,
         };
+    // Reading the project folder changes nothing, and never leaves it (Preferences → AI turns it
+    // off).
+    if id.starts_with("project.") {
+        return Verdict::Run { change: false };
+    }
     // Reading a web page changes nothing here (Preferences → AI turns the internet off).
     if id == "web.fetch" {
         return Verdict::Run { change: false };

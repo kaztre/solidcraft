@@ -381,7 +381,7 @@ fn start_test(app: &SolveApp, e: &agents::Entry, key: Option<String>) -> Test {
         Kind::Acp => {
             let argv = e.argv.clone();
             std::thread::spawn(move || {
-                let _ = tx.send(super::acp_client::test_agent(&argv, &working_dir()));
+                let _ = tx.send(super::acp_client::test_agent(&argv, &super::scratch_dir()));
             });
         }
         Kind::Api => {
@@ -483,6 +483,7 @@ fn connecting_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             ("ai.prefs.allow_control", "ai.prefs.allow_control_note", "agent_control", &mut app.preferences.agent_control),
             ("ai.prefs.connect_apps", "ai.prefs.connect_apps_note", "connect_ai_apps", &mut app.preferences.connect_ai_apps),
             ("ai.prefs.internet", "ai.prefs.internet_note", "assistant_internet", &mut app.preferences.assistant_internet),
+            ("ai.prefs.project", "ai.prefs.project_note", "assistant_project", &mut app.preferences.assistant_project),
             ("ai.prefs.background_commands", "ui.agent_off_thread_note", "agent_off_thread", &mut app.preferences.agent_off_thread),
             ("ai.prefs.connect_at_start", "ai.prefs.connect_at_start_note", "agent_connect_at_start", &mut app.preferences.agent_connect_at_start),
             ("ai.prefs.open_at_start", "ai.prefs.open_at_start_note", "agent_chat_open_at_start", &mut app.preferences.agent_chat_open_at_start),

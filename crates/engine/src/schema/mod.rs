@@ -72,6 +72,7 @@ pub mod motion;
 pub mod panels;
 pub mod parts_library;
 pub mod print_face;
+pub mod project;
 pub mod render;
 pub mod render_lights;
 pub mod render_ui;

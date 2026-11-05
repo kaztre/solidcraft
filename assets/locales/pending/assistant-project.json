@@ -1,0 +1,66 @@
+{
+  "en": {
+    "ai.prefs.project": "Let the assistant read the project folder",
+    "ai.prefs.project_note": "The assistant can list, search and read the files in the folder of the design in front (its Versions folder, else its own): PDFs, KiCad files, Word and text files. It only reads; anything it reads goes to your AI provider. Installed agents start in this folder. Off: it reads only what you add to a message.",
+    "cmd.file.text": "Read Document Text",
+    "cmd.project.files": "List Project Files",
+    "cmd.project.read": "Read Project File",
+    "cmd.project.search": "Search Project"
+  },
+  "de": {
+    "ai.prefs.project": "Dem Assistenten das Lesen des Projektordners erlauben",
+    "ai.prefs.project_note": "Der Assistent kann die Dateien im Ordner des vorderen Designs (seinem Versionsordner, sonst seinem eigenen) auflisten, durchsuchen und lesen: PDFs, KiCad-, Word- und Textdateien. Er liest nur; alles Gelesene geht an Ihren KI-Anbieter. Installierte Agenten starten in diesem Ordner. Aus: Er liest nur, was Sie einer Nachricht hinzufügen.",
+    "cmd.file.text": "Dokumenttext lesen",
+    "cmd.project.files": "Projektdateien auflisten",
+    "cmd.project.read": "Projektdatei lesen",
+    "cmd.project.search": "Projekt durchsuchen"
+  },
+  "ja": {
+    "ai.prefs.project": "アシスタントにプロジェクト フォルダーの読み取りを許可",
+    "ai.prefs.project_note": "アシスタントは前面のデザインのフォルダー (そのバージョン フォルダー、なければデザイン自身のフォルダー) にあるファイルを一覧表示、検索、読み取りできます: PDF、KiCad、Word、テキスト ファイル。読み取りのみで、読んだ内容は AI プロバイダーに送られます。インストール済みのエージェントはこのフォルダーで起動します。オフ: メッセージに追加したものだけを読みます。",
+    "cmd.file.text": "文書のテキストを読む",
+    "cmd.project.files": "プロジェクトのファイルを一覧表示",
+    "cmd.project.read": "プロジェクトのファイルを読む",
+    "cmd.project.search": "プロジェクトを検索"
+  },
+  "zh": {
+    "ai.prefs.project": "允许助手读取项目文件夹",
+    "ai.prefs.project_note": "助手可以列出、搜索和读取当前设计所在文件夹（其版本文件夹，否则为设计自身的文件夹）中的文件：PDF、KiCad、Word 和文本文件。它只读取；读取的内容会发送给你的 AI 提供商。已安装的代理会在此文件夹中启动。关闭：它只读取你添加到消息中的内容。",
+    "cmd.file.text": "读取文档文本",
+    "cmd.project.files": "列出项目文件",
+    "cmd.project.read": "读取项目文件",
+    "cmd.project.search": "搜索项目"
+  },
+  "ko": {
+    "ai.prefs.project": "어시스턴트의 프로젝트 폴더 읽기 허용",
+    "ai.prefs.project_note": "어시스턴트가 앞에 있는 디자인의 폴더(버전 폴더, 없으면 디자인 자체 폴더)에 있는 파일을 나열하고 검색하고 읽을 수 있습니다: PDF, KiCad, Word, 텍스트 파일. 읽기만 하며, 읽은 내용은 AI 공급자에게 전송됩니다. 설치된 에이전트는 이 폴더에서 시작합니다. 끄면 메시지에 추가한 것만 읽습니다.",
+    "cmd.file.text": "문서 텍스트 읽기",
+    "cmd.project.files": "프로젝트 파일 나열",
+    "cmd.project.read": "프로젝트 파일 읽기",
+    "cmd.project.search": "프로젝트 검색"
+  },
+  "ar": {
+    "ai.prefs.project": "السماح للمساعد بقراءة مجلد المشروع",
+    "ai.prefs.project_note": "يستطيع المساعد سرد الملفات في مجلد التصميم الحالي (مجلد إصداراته، وإلا مجلده نفسه) والبحث فيها وقراءتها: ملفات PDF وKiCad وWord والملفات النصية. يقرأ فقط، وكل ما يقرؤه يُرسل إلى مزوّد الذكاء الاصطناعي لديك. تبدأ الوكلاء المثبتة في هذا المجلد. عند الإيقاف: يقرأ فقط ما تضيفه إلى الرسالة.",
+    "cmd.file.text": "قراءة نص المستند",
+    "cmd.project.files": "سرد ملفات المشروع",
+    "cmd.project.read": "قراءة ملف من المشروع",
+    "cmd.project.search": "البحث في المشروع"
+  },
+  "he": {
+    "ai.prefs.project": "לאפשר לעוזר לקרוא את תיקיית הפרויקט",
+    "ai.prefs.project_note": "העוזר יכול לרשום, לחפש ולקרוא את הקבצים בתיקייה של העיצוב שבחזית (תיקיית הגרסאות שלו, ואם אין – התיקייה שלו): קובצי PDF,‏ KiCad,‏ Word וטקסט. הוא רק קורא; כל מה שהוא קורא נשלח לספק הבינה המלאכותית שלך. סוכנים מותקנים מתחילים בתיקייה זו. כבוי: הוא קורא רק את מה שתוסיף להודעה.",
+    "cmd.file.text": "קריאת טקסט המסמך",
+    "cmd.project.files": "רשימת קובצי הפרויקט",
+    "cmd.project.read": "קריאת קובץ מהפרויקט",
+    "cmd.project.search": "חיפוש בפרויקט"
+  },
+  "vi": {
+    "ai.prefs.project": "Cho phép trợ lý đọc thư mục dự án",
+    "ai.prefs.project_note": "Trợ lý có thể liệt kê, tìm kiếm và đọc các tệp trong thư mục của thiết kế đang mở phía trước (thư mục Phiên bản của nó, nếu không thì thư mục của chính nó): tệp PDF, KiCad, Word và văn bản. Trợ lý chỉ đọc; mọi thứ nó đọc được gửi đến nhà cung cấp AI của bạn. Các tác tử đã cài đặt khởi động trong thư mục này. Tắt: trợ lý chỉ đọc những gì bạn thêm vào tin nhắn.",
+    "cmd.file.text": "Đọc văn bản tài liệu",
+    "cmd.project.files": "Liệt kê tệp dự án",
+    "cmd.project.read": "Đọc tệp dự án",
+    "cmd.project.search": "Tìm trong dự án"
+  }
+}

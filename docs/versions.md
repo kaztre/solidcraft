@@ -1,7 +1,7 @@
 # Versions
 
-SolidCraft keeps versions of the designs and STEP files in a folder: you check in parts when
-they're ready, see who changed what and when, release a part as a revision, and put back an
+SolidCraft keeps versions of the files in a project folder: designs, STEP files, drawings as PDF,
+KiCad projects and documents. You check in files when they're ready, see who changed what and when, release a part as a revision, and put back an
 older version. Single parts and assemblies work the same way, and nothing needs to be installed
 or typed.
 
@@ -22,7 +22,11 @@ Preferences ▸ Design ▸ **Show the Versions tab in the Browser** takes the bu
 Open a design and switch to Versions. If its folder doesn't keep versions yet, press **Keep
 Versions of "FOLDER"**, or **Keep Versions of Another Folder…** to choose one, such as your
 library's or project's top folder. Every design (`.solidcraft`) and STEP file in the folder and
-its sub-folders then gets a history; meshes, drawings, PDFs and other files are left alone.
+its sub-folders then gets a history, whatever it is: designs, STEP files, PDFs, KiCad projects,
+documents and pictures. Other programs' scratch is left out: hidden files, lock files (`~$report.docx`),
+backups (`.bak`, a KiCad project's `-backups` folder, autosaves), temporary files, KiCad's
+per-person settings (`.kicad_prl`) and caches, and build folders. The assistant reads the same
+folder ([the project folder](agent-chat.md#the-project-folder)).
 
 The history is kept on this computer, in SolidCraft's data folder (on a Mac, `~/Library/
 Application Support/SolidCraft/versions`), not inside your folder: a folder synced by iCloud
@@ -33,10 +37,10 @@ own `.git` (cloned with git) uses that one.
 
 Save your changes, then on the Versions tab:
 
-1. **My changes** lists the parts that differ from their last version: new, changed or deleted.
+1. **My changes** lists the files that differ from their last version: new, changed or deleted.
    Untick any you don't want in this check-in.
 2. Type what changed in the box. It's shown in the history.
-3. Press **Check In N Parts**.
+3. Press **Check In N Files**.
 
 A design with unsaved changes says so, with a **Save** button. A file that iCloud Drive keeps
 only in the cloud isn't downloaded just to look at it; it shows "in iCloud", and checking it in
@@ -60,7 +64,8 @@ Rev X…**. Revisions are saved in the history and never move.
 **History** lists the versions newest first: the message, who checked in, when, and the
 revisions and names given to it. Pick one to see the files it changed and:
 
-- **Open This Version** opens a copy of the part as it was, in a new tab, to look at or measure.
+- **Open This Version** opens a copy of the file as it was: a design or CAD file in a new tab, to look
+  at or measure; a PDF, KiCad file or document in the program your computer opens it with.
   Saving the copy doesn't change anything in the folder.
 - **Restore NAME to This Version…** puts the part back as it was. It then shows in My changes;
   check it in to keep it. Newer versions stay in the history, so a restore can itself be undone

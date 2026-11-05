@@ -555,24 +555,27 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
         browser_files: None,
         agent_http: Some(std::sync::Arc::new(agent_http)),
         secrets: Some(std::sync::Arc::new(Keychain)),
-        show_in_folder: Some(Box::new(|path| {
-            let folder = std::path::Path::new(path).parent().unwrap_or_else(|| std::path::Path::new("."));
-            let mut command = std::process::Command::new(if cfg!(target_os = "windows") {
-                "explorer"
-            } else if cfg!(target_os = "macos") {
-                "open"
-            } else {
-                "xdg-open"
-            });
-            command.arg(folder);
-            #[cfg(target_os = "windows")]
-            {
-                use std::os::windows::process::CommandExt;
-                command.creation_flags(0x08000000);
-            }
-            let _ = command.spawn();
-        })),
+        show_in_folder: Some(Box::new(|path| system_open(std::path::Path::new(path).parent().unwrap_or_else(|| std::path::Path::new("."))))),
+        open_file: Some(Box::new(|path| system_open(std::path::Path::new(path)))),
     }
+}
+
+/// Open a folder in the file manager, or a file in the program the system opens it with.
+fn system_open(path: &std::path::Path) {
+    let mut command = std::process::Command::new(if cfg!(target_os = "windows") {
+        "explorer"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    });
+    command.arg(path);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    let _ = command.spawn();
 }
 
 /// HTTPS GET for the update check (docs/updates.md): certificates from the operating system, a

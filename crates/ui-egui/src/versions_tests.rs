@@ -46,7 +46,7 @@ fn a_part_on_its_own_keeps_versions_checks_in_and_is_released() {
     h.app.versions.message = "First clip".into();
     h.app.versions.release = true;
     h.frames(2);
-    h.step(&json!({"widget": "Check In 1 Part"})).unwrap();
+    h.step(&json!({"widget": "Check In 1 File"})).unwrap();
     settle(&mut h, |app| history_len(app) == 1 && status(app).is_some_and(|s| s["changes"].as_array().is_some_and(Vec::is_empty)));
     let history = h.app.versions.history.clone().unwrap().unwrap();
     assert_eq!(history["commits"][0]["message"], "First clip");

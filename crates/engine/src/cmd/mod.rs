@@ -93,6 +93,7 @@ mod parameter_sweep;
 mod parameters;
 mod plastic;
 mod print_face;
+mod project;
 mod render;
 mod render_ui;
 #[cfg(test)]
@@ -350,6 +351,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(parts_library::COMMANDS.iter());
     v.extend(versions::COMMANDS.iter());
     v.extend(web::COMMANDS.iter());
+    v.extend(project::COMMANDS.iter());
     v.extend(bom::COMMANDS.iter());
     v.extend(mass_properties::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());

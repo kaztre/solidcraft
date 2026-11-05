@@ -27,6 +27,7 @@ pub mod occurrences;
 pub mod panels;
 pub mod params;
 pub mod product_scene;
+pub mod project;
 pub mod recovery;
 pub mod render_jobs;
 pub mod render_lights;

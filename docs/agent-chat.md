@@ -434,6 +434,44 @@ T200 thruster" and it reads the maker's page, finds the CAD download and inserts
 - **Off.** **Let the assistant use the internet** (Preferences → AI, on by default) turns all of this
   off, Anthropic's web search included.
 
+## The project folder
+
+Keep a project's documents beside its CAD in one folder: electrical drawings as PDF, KiCad
+schematics and boards, datasheets, notes. The assistant reads that folder, so it can answer "which
+connector carries the 48 V supply?" from the schematic or "what does the wiring drawing say about
+J3?" from the PDF.
+
+- **Which folder.** The project folder is the folder that keeps versions of the design in front
+  (see [Versions](versions.md)). Without one, it is the nearest folder above the design with a
+  `PROJECT.md` (or its own git history), so a design in `Pod/CAD/` still reads `Pod/Electrical/`;
+  else the folder the design is saved in. A design not saved yet has none.
+- **What the assistant can do.** List the files (`project.files`), search their names and text,
+  KiCad files included (`project.search`), and read one (`project.read`):
+  - a text, Markdown or CSV file as it is;
+  - a PDF's text, page by page. The PDF is read in a separate helper process, so a damaged one
+    can't close SolidCraft. A scanned drawing with no text in it reads as empty pages: keep a PDF
+    exported from your drawing program;
+  - a Word file's paragraphs;
+  - a KiCad schematic or board as a summary: its parts (reference, value, symbol or footprint,
+    fields such as MPN, place and side), sheets, net labels or nets, copper layers, thickness and
+    board outline. It can ask for the file's own text instead.
+
+  Designs and CAD files are opened or inserted instead, and it can't see pictures from the folder:
+  add one to a message to show it.
+- **PROJECT.md.** A `PROJECT.md` (else `README.md`) at the top of the folder is the project's
+  brief: the assistant reads it first, and it marks the project's top folder. Say what the project is, what's in each folder, part
+  numbers, and anything it should know.
+- **Only reading, only inside.** None of these change a file. Hidden files, other programs' backups
+  and build folders are left out, and nothing outside the folder can be reached, through `..` or
+  a link.
+- **Installed agents** (Claude Code, Codex and others) start in the project folder, so their own
+  tools see it too. They still ask before they change a file. A new chat starts in the project of
+  the design in front at the time.
+- **Privacy.** What the assistant reads goes to the AI provider you chose, as everything in the
+  chat does. A local model keeps it on your computer.
+- **Off.** **Let the assistant read the project folder** (Preferences → AI, on by default) turns
+  all of this off; agents then start in SolidCraft's own working folder.
+
 ## Permissions
 
 Preferences → AI → **Permissions** decides what the agent may do without asking, for every agent;

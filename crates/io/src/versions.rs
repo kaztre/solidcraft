@@ -1,8 +1,9 @@
 //! Versions of the parts in a folder (docs/versions.md). Each check-in saves the parts it names
 //! as a new version of the folder, in git's own format (zlib objects named by their SHA-1, trees,
 //! commits, annotated tags), written here so that nothing has to be installed and the history
-//! can later be shared through any git host. Only designs and STEP files are kept; meshes,
-//! drawings and everything else in the folder are left alone.
+//! can later be shared through any git host. Every file in the folder is kept (designs, STEP
+//! files, drawings as PDF, KiCad projects, documents), except other programs' scratch: hidden,
+//! lock, backup and temporary files and build folders ([`is_kept`], [`is_skipped_folder`]).
 //!
 //! The history lives in the folder's own `.git` when it has one, and otherwise in a folder the
 //! caller names (SolidCraft's data folder): a synced folder such as iCloud Drive or Google Drive
@@ -16,8 +17,13 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 
-/// The file types a folder's versions keep, lower-case.
-pub const KEPT_EXTS: [&str; 5] = [crate::DESIGN_EXTS[0], crate::DESIGN_EXTS[1], crate::DESIGN_EXTS[2], "step", "stp"];
+/// Files a folder's versions leave out, by extension (lower-case): backups, temporary files, and
+/// KiCad's per-person window settings and caches.
+const SKIPPED_EXTS: &[&str] = &["bak", "kicad_prl", "lck", "lock", "swp", "tmp"];
+/// Files a folder's versions leave out, by name: system files and KiCad's footprint cache.
+const SKIPPED_NAMES: &[&str] = &["desktop.ini", "fp-info-cache", "thumbs.db"];
+/// Folders a folder's versions leave out: build output, caches, and KiCad's own backups.
+const SKIPPED_FOLDERS: &[&str] = &["__pycache__", "node_modules", "target"];
 /// The most files one folder's versions keep.
 pub const MAX_FILES: usize = 100_000;
 /// The largest file a check-in keeps (bigger STEP files are refused, not cut short).
@@ -192,10 +198,24 @@ pub struct Store {
     pub git: PathBuf,
 }
 
-/// Is this file one a folder's versions keep?
+/// Is this file one a folder's versions keep? Every file is, except hidden ones and other
+/// programs' scratch: lock files (`~$report.docx`, `.~lock`), backups (`.bak`, `name~`), temporary
+/// files, KiCad's autosaves, caches and per-person settings, and system files.
 pub fn is_kept(path: &str) -> bool {
-    let ext = Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
-    KEPT_EXTS.contains(&ext.as_str())
+    let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    let lower = name.to_ascii_lowercase();
+    let ext = Path::new(&lower).extension().and_then(|e| e.to_str()).unwrap_or("").to_string();
+    !(name.is_empty()
+        || name.starts_with(['.', '~', '#'])
+        || name.ends_with('~')
+        || lower.starts_with("_autosave-")
+        || SKIPPED_EXTS.contains(&ext.as_str())
+        || SKIPPED_NAMES.contains(&lower.as_str()))
+}
+
+/// Is this a folder a folder's versions leave out (its files are not kept)?
+pub fn is_skipped_folder(name: &str) -> bool {
+    name.starts_with('.') || name.ends_with("-backups") || SKIPPED_FOLDERS.contains(&name.to_ascii_lowercase().as_str())
 }
 
 /// A relative `/` path inside the folder: no empty, `.`, `..` or hidden parts, no `\`.
@@ -763,7 +783,7 @@ impl Store {
                 let Ok(kind) = entry.file_type() else { continue };
                 let path = if prefix.is_empty() { name.clone() } else { format!("{prefix}/{name}") };
                 if kind.is_dir() {
-                    if depth < MAX_DEPTH {
+                    if depth < MAX_DEPTH && !is_skipped_folder(&name) {
                         stack.push((entry.path(), path, depth + 1));
                     }
                 } else if kind.is_file() && is_kept(&name) {
@@ -860,7 +880,7 @@ impl Store {
             let abs = self.work.join(path);
             if abs.is_file() {
                 if !is_kept(path) {
-                    return Err(refused(format!("{path} isn't a design or STEP file, which are all versions keep")));
+                    return Err(refused(format!("{path} is a lock, backup or temporary file, which versions don't keep")));
                 }
                 let meta = std::fs::metadata(&abs).map_err(|e| io(path, e))?;
                 let id = self.write_blob_from(&abs)?;
