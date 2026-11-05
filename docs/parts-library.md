@@ -45,10 +45,13 @@ with `.`) and shortcuts are skipped.
 
 **Insert Part** always links the part (`component.insert_design`): when the library part changes,
 **Update Links** brings the change into every assembly that uses it. The assembly also keeps a
-copy, so it opens without the library.
+copy, so it opens without the library. For a part that is still just its STEP file's import, that copy is the
+vendor's STEP itself, so the part looks in the assembly exactly as it does on its own. (Before
+this, a thread or a notched chamfer could lose faces in the copy, and the part looked hollow:
+**Update Links** in such an assembly brings in the full part.)
 
 A STEP or IGES part is first saved as a SolidCraft part beside it, with the same name
-(`T200.STEP` → `T200.solidcraft`), then linked. From then on the library lists the SolidCraft
+(`T200.STEP` → `T200.sc`), then linked. From then on the library lists the SolidCraft
 part instead of the STEP, which stays as the vendor's original. The new part gets:
 
 - its **name** and **description** from the name the window shows,

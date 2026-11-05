@@ -229,6 +229,17 @@ fn design_bodies(file: &Path, bytes: &[u8], validation: solidcraft_kernel::Valid
     Ok((name, feature, faces, metadata, properties))
 }
 
+/// The STEP text of `part` when the design is that file's import and nothing more: one Import
+/// feature of a single part (no assembly tree to place), every occurrence where the file put it,
+/// and no appearance of its own; then its bodies are that text's, as linking it builds them.
+fn own_import(part: &Session) -> Option<std::sync::Arc<str>> {
+    let [f] = part.doc.features.as_slice() else { return None };
+    let solidcraft_doc::FeatureKind::Import { step, components, skip, .. } = &f.kind else { return None };
+    let single = components.len() <= 1 && components.iter().all(|c| c.children.is_empty());
+    let placed = part.doc.occurrences.iter().all(|o| solidcraft_doc::is_identity(&o.transform));
+    (single && skip.is_empty() && placed && part.doc.appearances.is_empty()).then(|| step.clone())
+}
+
 /// The solid bodies of `part`, the design saved as `shown`, as an Import feature.
 fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
     let name = part.doc.name.clone();
@@ -240,9 +251,21 @@ fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
     if solids.is_empty() {
         return Err(EngineError::Other(format!("{shown}: the design has no solid bodies to link")));
     }
-    let step = solidcraft_io::export(&part.doc.painted_for_link(&world), &solids, solidcraft_io::Format::Step, &name)
-        .map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
-    let mut feature = solidcraft_io::step_import_feature(&step, shown).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
+    // A part that is its CAD file's import and nothing more (a Parts Library part) links its own
+    // STEP text, which builds the bodies it shows; written out again and read back, the faces of
+    // a thread or a notched chamfer could come back short (they did on a MacArtney bulkhead).
+    let mut feature = match own_import(part) {
+        Some(step) => solidcraft_io::step_import_feature(step.as_bytes(), shown).ok().filter(|f| f.import.bodies.len() == solids.len()),
+        None => None,
+    }
+    .map_or_else(
+        || {
+            let step = solidcraft_io::export(&part.doc.painted_for_link(&world), &solids, solidcraft_io::Format::Step, &name)
+                .map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
+            solidcraft_io::step_import_feature(&step, shown).map_err(|e| EngineError::Other(format!("{shown}: {e}")))
+        },
+        Ok,
+    )?;
     if world.bodies.len() > solids.len() {
         feature.warnings.push(format!("{} mesh bodies of {shown} are not linked", world.bodies.len() - solids.len()));
     }
@@ -933,6 +956,44 @@ mod tests {
         run(&mut recovered, "file.save_as", json!({"path": dir.join("asm/sub/case.solidcraft")}));
         run(&mut recovered, "edit.undo", json!({}));
         assert_eq!(run(&mut recovered, "component.links", json!({}))["links"][0]["found"], true);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A Parts Library part (its STEP file's import and nothing more) links that STEP text, not
+    /// its bodies written out again: read back, a thread's faces could come back short.
+    #[test]
+    fn a_part_that_is_only_its_steps_import_links_that_step() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-own-step-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let step = dir.join("bracket.step");
+        let mut maker = Session::default();
+        run(&mut maker, "solid.box", json!({"length": 10, "width": 20, "height": 5}));
+        run(&mut maker, "file.export", json!({"path": step}));
+        let part = dir.join("bracket.solidcraft");
+        let mut p = Session::default();
+        run(&mut p, "doc.open", json!({"path": step}));
+        run(&mut p, "file.save", json!({"path": part}));
+        let FeatureKind::Import { step: own, .. } = &p.doc.features[0].kind else { panic!("an import") };
+        let own = own.clone();
+        let mut a = Session::default();
+        run(&mut a, "component.insert_design", json!({"path": part}));
+        let linked = a.doc.features.iter().find_map(|f| match &f.kind {
+            FeatureKind::Import { step, .. } => Some(step.clone()),
+            _ => None,
+        });
+        assert_eq!(linked.as_deref(), Some(&*own), "the part's own STEP text");
+        assert!((volume(&mut a) - 1000.0).abs() < 1e-6);
+        // A part with more than its import links its bodies written out, as before.
+        run(&mut p, "solid.box", json!({"length": 1, "width": 1, "height": 1, "origin": [30, 0, 0]}));
+        run(&mut p, "file.save", json!({"path": part}));
+        let mut b = Session::default();
+        run(&mut b, "component.insert_design", json!({"path": part}));
+        let linked = b.doc.features.iter().find_map(|f| match &f.kind {
+            FeatureKind::Import { step, .. } => Some(step.clone()),
+            _ => None,
+        });
+        assert_ne!(linked.as_deref(), Some(&*own));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
