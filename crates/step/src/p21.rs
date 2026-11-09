@@ -4,9 +4,24 @@
 //! error is a message, never a panic.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// Largest STEP text we parse.
+/// Largest STEP text we parse by default; [`set_max_bytes`] raises it (#4086).
 pub const MAX_BYTES: usize = 512 << 20;
+/// The largest STEP text parsed now.
+static LIMIT: AtomicUsize = AtomicUsize::new(MAX_BYTES);
+
+/// Parse STEP text up to `bytes` from now on (Preferences › General › Largest file to open, or
+/// `--max-file-size`); never below [`MAX_BYTES`].
+pub fn set_max_bytes(bytes: usize) {
+    LIMIT.store(bytes.max(MAX_BYTES), Ordering::Relaxed);
+}
+
+/// The largest STEP text parsed now.
+pub fn max_bytes() -> usize {
+    LIMIT.load(Ordering::Relaxed)
+}
+
 /// Most entity instances in one file.
 pub const MAX_ENTITIES: usize = 20_000_000;
 /// Deepest parameter list nesting.
@@ -411,8 +426,9 @@ pub fn parse(text: &str) -> Result<Exchange, String> {
 
 /// [`parse`], reporting progress to `watch` and stopping when it cancels.
 pub fn parse_with(text: &str, watch: Option<&dyn Progress>) -> Result<Exchange, String> {
-    if text.len() > MAX_BYTES {
-        return err(format!("STEP file too large ({} MB, limit {} MB)", text.len() >> 20, MAX_BYTES >> 20));
+    let limit = max_bytes();
+    if text.len() > limit {
+        return err(format!("STEP file too large ({} MB, limit {} MB)", text.len() >> 20, limit >> 20));
     }
     let mut lx = Lexer { s: text.as_bytes(), i: 0 };
     let magic = lx.keyword()?;

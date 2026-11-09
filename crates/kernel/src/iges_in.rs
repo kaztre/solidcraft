@@ -13,6 +13,18 @@ mod assembly;
 
 /// Largest IGES file we read.
 pub const MAX_IGES_BYTES: usize = 512 << 20;
+
+/// Read STEP and IGES files up to `bytes` from now on (Preferences › General › Largest file to
+/// open, or `--max-file-size`, #4086); never below the defaults.
+pub fn set_max_import_bytes(bytes: usize) {
+    solidcraft_step::p21::set_max_bytes(bytes);
+}
+
+/// The largest STEP or IGES file read now.
+pub fn max_import_bytes() -> usize {
+    solidcraft_step::p21::max_bytes().max(MAX_IGES_BYTES)
+}
+
 const MAX_ENTITIES: usize = 2_000_000;
 const MAX_DEPTH: usize = 32;
 const MAX_LIST: usize = 1_000_000;
@@ -1320,8 +1332,9 @@ pub fn iges_to_step(text: &str) -> std::result::Result<(String, Vec<String>), St
 }
 
 fn translate(text: &str) -> std::result::Result<(String, Vec<String>), String> {
-    if text.len() > MAX_IGES_BYTES {
-        return Err("IGES file too large".into());
+    let limit = max_import_bytes();
+    if text.len() > limit {
+        return Err(format!("IGES file too large ({} MB, limit {} MB)", text.len() >> 20, limit >> 20));
     }
     let f = solidcraft_profile::scope("import", "iges.parse", || parse(text))?;
     let tol = (f.resolution * f.unit).clamp(1e-6, 0.05).max(1e-5);

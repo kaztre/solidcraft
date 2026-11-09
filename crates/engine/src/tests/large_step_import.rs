@@ -148,13 +148,22 @@ fn raised_file_limits_let_larger_step_and_design_files_be_read() {
     limits::set_preferred(FileLimits { step: GB, design: GB }).unwrap();
     assert_eq!((limits::max_step_bytes(), limits::max_design_bytes()), (1 << 30, 1 << 30));
     assert!(limits::check(Kind::Step, 512 * MB + 1).is_ok());
+    // The STEP and IGES readers parse up to the raised limit too, not only the file check before
+    // them: a 625 MB STEP file passed the check and was then refused at 512 MB.
+    assert_eq!(solidcraft_kernel::max_import_bytes(), 1 << 30);
     let error = s.execute("doc.open", &json!({"path": design})).unwrap_err().to_string();
     assert!(!error.contains("too large"), "{error}");
     // The flag overrides the preference for the run, and the ceiling holds for both.
     limits::set_override(Some(2 * GB)).unwrap();
     assert_eq!(limits::effective(), FileLimits { step: 2 * GB, design: 2 * GB });
+    assert_eq!(solidcraft_kernel::max_import_bytes(), 2 << 30);
     assert!(limits::set_override(Some(16 * GB + 1)).is_err());
     assert!(limits::set_preferred(FileLimits { step: 17 * GB, design: GB }).is_err());
     assert_eq!(limits::preferred(), FileLimits { step: GB, design: GB }, "a refused value changes nothing");
+    assert_eq!(solidcraft_kernel::max_import_bytes(), 2 << 30, "a refused value changes nothing");
+    // Back to the defaults, the readers' limit falls back too.
+    limits::set_override(None).unwrap();
+    limits::set_preferred(FileLimits::DEFAULT).unwrap();
+    assert_eq!(solidcraft_kernel::max_import_bytes(), 512 << 20);
     let _ = std::fs::remove_dir_all(&dir);
 }
