@@ -1996,3 +1996,40 @@ fn insert_design_offers_the_other_open_designs_then_browse() {
     h.frames(3);
     assert_eq!(linked(&h.app, "plate.solidcraft"), 2);
 }
+
+/// A context menu taller than the window (a component's, in a short window) stays inside it and
+/// scrolls to its last items: Isolate and Show/Hide were below the window's edge, out of reach.
+#[test]
+fn a_menu_taller_than_the_window_scrolls_to_its_last_items() {
+    use crate::scenario::Harness;
+    let mut h = Harness::new();
+    h.call("ui.resize", json!({"width": 1200, "height": 500}));
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    let b = h.app.session.world_state().unwrap().bodies[0].name.clone();
+    h.app.run("component.from_bodies", json!({"bodies": [b]})).unwrap();
+    let c = h.app.session.doc.components[0].id;
+    let target = Target::Component { id: c };
+    assert!(context_menu::list_height_of(&context_menu::items(&h.app, &target)) > 500.0, "the menu is taller than the window");
+    context_menu::request_open(&mut h.app, pos2(100.0, 300.0), target);
+    h.frames(4);
+    let menu = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_context_menu"))).expect("the menu is open");
+    assert!(menu.top() >= 0.0 && menu.bottom() <= 500.0, "the menu stays in the window: {menu:?}");
+    let isolate = |h: &Harness| h.widget("Isolate").map(|[_, y]| y);
+    assert!(isolate(&h).is_none_or(|y| y > 500.0), "Isolate starts below the window's edge");
+    let over = menu.center();
+    for _ in 0..10 {
+        h.frame_with(vec![
+            egui::Event::PointerMoved(over),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -200.0),
+                modifiers: egui::Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+            },
+        ]);
+    }
+    h.frames(10);
+    let y = isolate(&h).expect("Isolate is in the menu");
+    assert!(y < 500.0, "scrolled into the window: {y}");
+}

@@ -736,10 +736,12 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.home", "Home View", "home"));
         v.push(Item::sep());
         let can_unisolate = !app.session.visibility.hidden_bodies.is_empty() || !app.session.visibility.hidden_occurrences.is_empty();
-        let anything_hidden =
-            can_unisolate || !app.session.visibility.hidden_sketches.is_empty() || !app.session.visibility.hidden_folders.is_empty();
+        let anything_hidden = can_unisolate
+            || !app.session.visibility.hidden_sketches.is_empty()
+            || !app.session.visibility.hidden_folders.is_empty()
+            || !app.session.visibility.hidden_joints.is_empty();
         v.push(act("ui.showAll", "Show All", "eye").on(anything_hidden));
-        v.push(act("ui.showAll", "Unisolate", "eye").on(can_unisolate));
+        v.push(act("ui.unisolate", "Unisolate", "eye").on(can_unisolate));
         v.push(Item::sep());
         v.push(cmd(app, "solid.extrude", "Extrude"));
         v.push(cmd(app, "solid.fillet", "Fillet"));
@@ -1092,7 +1094,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     v.push(act("ui.rename", "Rename", "rename").key("F2").with(json!({ "component": id })));
     v.push(Item::sep());
     v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })).on(!bodies.is_empty()));
-    v.push(act("ui.showAll", "Show All Bodies", "eye"));
+    v.push(act("ui.unisolate", "Show All Bodies", "eye"));
     v.push(act("ui.isolate", "Isolate", "body").with(json!({ "bodies": names })).on(!bodies.is_empty() && id != 0));
     v.push(act("ui.newGroup", "New Group", "folder").with(json!({ "component": id })));
     if id != 0 {
@@ -1505,6 +1507,12 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.showAll" => {
             // One command and so one undo step: everything shown, folders and placements included.
             let _ = app.run("browser.visibility", json!({ "folder": "all", "visible": true }));
+        }
+        "ui.unisolate" => {
+            // What Isolate hid comes back: bodies and placements, in one step. Joints, sketches and
+            // construction keep their own eyes (an imported assembly's thousands of rigid joints
+            // stay hidden).
+            let _ = app.run("browser.visibility", json!({ "folder": "bodies", "visible": true }));
         }
         "ui.isolate" => {
             // The picked bodies stay (shown first if they were hidden), everything else goes.
@@ -2243,6 +2251,17 @@ fn radial_center(at: Pos2, screen: Rect) -> Pos2 {
 }
 
 /// Height of a list of items as [`list_row`] draws them in [`menu_frame`] (margins and border).
+/// The tallest a list menu's rows may stand in a window of `screen`: past it they scroll.
+fn list_max_height(screen: Rect) -> f32 {
+    (screen.height() - 24.0).max(60.0)
+}
+
+/// [`list_height`] for tests: how tall a list menu of `items` would stand unscrolled.
+#[cfg(test)]
+pub(crate) fn list_height_of(items: &[Item]) -> f32 {
+    list_height(items)
+}
+
 fn list_height(items: &[Item]) -> f32 {
     14.0 + items
         .iter()
@@ -2399,6 +2418,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let had_submenu = app.menu.submenu.is_some();
     let leaving = app.menu.submenu_leave.is_some();
     let enabled: Vec<_> = list.iter().map(|i| i.enabled && !i.is_sep() && !i.is_heading()).collect();
+    let key_row_before = app.menu.key_row;
     if app.menu.submenu.is_none() {
         let enter = crate::ui_kit::Menu::navigate(ctx, &enabled, &mut app.menu.key_row);
         let right = ctx.input(|i| i.key_pressed(egui::Key::ArrowRight));
@@ -2428,32 +2448,50 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             if target == Target::Workspace {
                 picked = crate::ui_kit::workspace_menu(ui, &list, key_row, (screen.bottom() - list_at.y).max(160.0)).or(picked.take());
             } else {
+                // A menu taller than the window scrolls instead of running off its edge, and the
+                // row the arrow keys move to is scrolled into view.
+                let keyed = key_row != key_row_before;
                 menu_frame(ui, |ui| {
-                    for (k, item) in list.iter().enumerate() {
-                        if item.is_sep() || item.is_heading() {
-                            let _ = list_row_lit(ui, item, false);
-                        } else if item.children.is_empty() {
-                            let row = kit_item(item, key_row == Some(k)).show(ui);
-                            if row.clicked() && item.enabled {
-                                picked = Some(item.clone());
-                            }
-                            other_row |= row.hovered();
-                        } else {
-                            let row = kit_item(item, key_row == Some(k) || (app.menu.submenu == Some(k) && !leaving)).show(ui);
-                            // Appearance keeps its direct editor action as well as hover shortcuts.
-                            if item.enabled && row.clicked() && item.id == "ui.appearance" {
-                                picked = Some(item.clone());
-                            } else if item.enabled && (crate::ui_kit::Menu::flyout_hover(&row) || row.clicked()) {
-                                if app.menu.submenu != Some(k) {
-                                    app.menu.submenu_key = None;
+                    // The rows take their own height (up to the window's) wherever the menu stands,
+                    // not only the room left below it: the menu was placed for that height.
+                    let rows_height = list_height(&list).min(list_max_height(screen));
+                    egui::ScrollArea::vertical()
+                        .id_salt("sc_context_menu_rows")
+                        .max_height(list_max_height(screen))
+                        .min_scrolled_height(rows_height)
+                        .show(ui, |ui| {
+                            for (k, item) in list.iter().enumerate() {
+                                if item.is_sep() || item.is_heading() {
+                                    let _ = list_row_lit(ui, item, false);
+                                } else if item.children.is_empty() {
+                                    let row = kit_item(item, key_row == Some(k)).show(ui);
+                                    if keyed && key_row == Some(k) {
+                                        row.scroll_to_me(None);
+                                    }
+                                    if row.clicked() && item.enabled {
+                                        picked = Some(item.clone());
+                                    }
+                                    other_row |= row.hovered();
+                                } else {
+                                    let row = kit_item(item, key_row == Some(k) || (app.menu.submenu == Some(k) && !leaving)).show(ui);
+                                    // Appearance keeps its direct editor action as well as hover shortcuts.
+                                    if item.enabled && row.clicked() && item.id == "ui.appearance" {
+                                        picked = Some(item.clone());
+                                    } else if item.enabled && (crate::ui_kit::Menu::flyout_hover(&row) || row.clicked()) {
+                                        if app.menu.submenu != Some(k) {
+                                            app.menu.submenu_key = None;
+                                        }
+                                        app.menu.submenu = Some(k);
+                                    }
+                                    if keyed && key_row == Some(k) {
+                                        row.scroll_to_me(None);
+                                    }
+                                    if app.menu.submenu == Some(k) {
+                                        submenu_row = Some((k, row.rect));
+                                    }
                                 }
-                                app.menu.submenu = Some(k);
                             }
-                            if app.menu.submenu == Some(k) {
-                                submenu_row = Some((k, row.rect));
-                            }
-                        }
-                    }
+                        });
                 });
             }
         });

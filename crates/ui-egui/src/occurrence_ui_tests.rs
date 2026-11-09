@@ -70,6 +70,31 @@ fn viewport_restores_isolated_occurrences_and_undo_restores_isolation() {
     }
 }
 
+/// Unisolate brings back what Isolate hid, the parts, and leaves hidden joints hidden: after an
+/// imported assembly (its rigid joints hidden) it showed thousands of joint glyphs. Show All
+/// still shows everything.
+#[test]
+fn unisolate_keeps_hidden_joints_hidden_and_show_all_shows_them() {
+    let (mut h, _, first, second) = fixture();
+    let at = |o: u64| json!({"occurrence": o, "point": [5, 5, 10], "z": [0, 0, 1]});
+    let joint = h.app.run("joint.create", json!({"type": "rigid", "a": at(first), "b": at(second)})).unwrap()["joint"].as_u64().unwrap();
+    h.app.run("browser.visibility", json!({"folder": "joints", "visible": false})).unwrap();
+    assert!(!h.app.session.joint_visible(joint));
+    h.app.session.selection.clear();
+    let item = |h: &Harness, target: &Target, label: &str| context_menu::items(&h.app, target).into_iter().find(|i| i.label == label).unwrap();
+    let isolate = item(&h, &Target::Occurrence { path: vec![first] }, "Isolate");
+    context_menu::run_item(&mut h.app, &isolate, egui::Pos2::ZERO);
+    assert_eq!(h.app.session.visibility.hidden_occurrences, vec![vec![second]]);
+    let unisolate = item(&h, &Target::Viewport, "Unisolate");
+    context_menu::run_item(&mut h.app, &unisolate, egui::Pos2::ZERO);
+    assert!(h.app.session.visibility.hidden_occurrences.is_empty(), "the parts are back");
+    assert!(!h.app.session.joint_visible(joint), "the joint stays hidden");
+    let show_all = item(&h, &Target::Viewport, "Show All");
+    assert!(show_all.enabled, "a hidden joint is something Show All shows");
+    context_menu::run_item(&mut h.app, &show_all, egui::Pos2::ZERO);
+    assert!(h.app.session.joint_visible(joint), "Show All shows it");
+}
+
 #[test]
 fn folder_visibility_shortcut_targets_only_the_clicked_placement() {
     let (mut h, component, first, second) = fixture();
@@ -528,7 +553,7 @@ fn a_folded_folders_menu_items_move_to_the_placements_menu() {
     let items = context_menu::items(&h.app, &target);
     let from = items.iter().find(|i| i.id == "component.from_bodies").unwrap();
     assert_eq!(from.params.as_ref().unwrap()["bodies"], json!(["Body1", "Second"]));
-    assert!(has(&h, "ui.newGroup") && has(&h, "ui.showAll"), "on every component's menu");
+    assert!(has(&h, "ui.newGroup") && has(&h, "ui.unisolate"), "on every component's menu");
     assert!(!has(&h, "ui.groupSelected"), "nothing selected");
     h.app.session.selection = vec![Sel::Body { name: "Body1".into() }, Sel::Body { name: "Second".into() }];
     let group = context_menu::items(&h.app, &target).into_iter().find(|i| i.id == "ui.groupSelected").unwrap();
