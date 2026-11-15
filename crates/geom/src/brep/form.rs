@@ -69,22 +69,27 @@ fn quarters([a0, a1]: [f64; 2], reach: f64) -> Option<(f64, usize)> {
         let q1 = (a1 / FRAC_PI_2 - SLACK).ceil();
         (q0, (q1 - q0).max(1.0) as usize)
     };
-    let on_end = |a: f64, reach: f64| {
-        let end = (a / FRAC_PI_2).round() * FRAC_PI_2;
-        if (a - end).abs() <= reach { end } else { a }
-    };
     let rounding = reach.min(1e-9);
-    let (q0, n) = match count(on_end(a0, rounding), on_end(a1, rounding)) {
+    let (q0, n) = match count(on_quarter_line(a0, rounding), on_quarter_line(a1, rounding)) {
         (q0, n) if n < 4 => (q0, n),
-        _ => count(on_end(a0, reach), on_end(a1, reach)),
+        _ => count(on_quarter_line(a0, reach), on_quarter_line(a1, reach)),
     };
     (n <= 5).then_some((q0, n))
 }
 
+/// An angle within `reach` of a quarter's end, on it; another as it is.
+fn on_quarter_line(a: f64, reach: f64) -> f64 {
+    let end = (a / FRAC_PI_2).round() * FRAC_PI_2;
+    if (a - end).abs() <= reach { end } else { a }
+}
+
 /// A face's quarters along an angle direction and its domain there: a whole turn is exactly
 /// four quarters from the one it starts in (the form closes on itself, so it is periodic and the
-/// face's seam uses lie a period apart), anything less the quarters it needs ([`quarters`], ends
-/// within `reach` of a quarter's end on it).
+/// face's seam uses lie a period apart), a start within `reach` of a quarter's end starting on
+/// it (a seam a rounding short of the quarter line its frame puts it on would otherwise start
+/// the form a quarter early, and the seam's second use would lie a quarter past its end);
+/// anything less the quarters it needs ([`quarters`], ends within `reach` of a quarter's end on
+/// it).
 fn face_quarters(a: [f64; 2], reach: f64) -> Option<((f64, usize), [f64; 2])> {
     if a[1] - a[0] > TAU + HELIX_SLACK {
         // A helical strip of more than a turn: the quarters it spans, its form covering the
@@ -106,8 +111,7 @@ fn face_quarters(a: [f64; 2], reach: f64) -> Option<((f64, usize), [f64; 2])> {
         // a helix round, a line and a helix back, its edges a hair either side of the line's
         // angle) is then the form's seam; from the quarter before, the seam cut across both
         // helices and their pcurves jumped a period half way, so the face was left out.
-        let line = (a[0] / FRAC_PI_2).round() * FRAC_PI_2;
-        let q0 = quarter_of(if (a[0] - line).abs() <= reach { line } else { a[0] });
+        let q0 = quarter_of(on_quarter_line(a[0], reach));
         return Some(((q0, 4), [q0, q0 + 4.0]));
     }
     let grid = quarters(a, reach)?;

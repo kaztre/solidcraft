@@ -17,9 +17,9 @@ use serde_json::{Value, json};
 use solidcraft_engine::io::parts_library::{self, Entry, Kind, Library};
 
 use crate::SolveApp;
-use crate::i18n::{format, tr};
-use crate::theme::Tokens;
 use crate::ui_kit::Column;
+use solidcraft_theme::Tokens;
+use solidcraft_ui_text::{format, tr};
 
 /// Parts drawn at once; the count says how many more matched.
 const MAX_ROWS: usize = 500;
@@ -636,7 +636,7 @@ fn tree_row(ui: &mut egui::Ui, key: &str, depth: usize, label: &str, count: usiz
         egui::FontId::proportional(t.font_label),
         if picked { t.text } else { t.text_dim },
     );
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, picked, label));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::RadioButton, true, picked, label));
     crate::scenario::publish_rect(&format!("dialog:list:parts_library_tree:{key}"), rect);
     (response.clicked() && !toggled, toggled)
 }
@@ -698,7 +698,7 @@ fn card(ui: &mut egui::Ui, w: &mut PartsLibrary, lib: usize, library: &Library, 
     let picture_h = CARD_WIDTH * th as f32 / tw as f32;
     let (rect, response) = ui.allocate_exact_size(vec2(CARD_WIDTH, picture_h + t.space_8 + crate::ui_kit::row_height() * 1.6), egui::Sense::click());
     let picked = w.picked.as_ref().is_some_and(|(l, p)| *l == lib && *p == entry.path);
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, picked, &entry.name));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::RadioButton, true, picked, &entry.name));
     crate::scenario::publish_rect(&format!("dialog:list:parts_library:{}", entry.path), rect);
     if !ui.is_rect_visible(rect) {
         return response;
@@ -745,9 +745,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let t = Tokens::get();
     let (mut add, mut remove, mut refresh, mut insert_picked, mut start_convert) = (false, None, false, false, None);
     let stand_up_default = app.preferences.parts_library_stand_up;
-    let closed = crate::ui_kit::Window::new(egui::Id::new("sc_parts_library"), "folder", tr("cmd.library.parts.search")).cards(10.0 / 3.0).show_body(
-        ctx,
-        |ui| {
+    let closed = crate::ui_kit::Window::new(egui::Id::unique("sc_parts_library"), "folder", tr("cmd.library.parts.search"))
+        .cards(10.0 / 3.0)
+        .show_body(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
                 if crate::ui_kit::button(ui, tr("ui.parts_library_add"), crate::ui_kit::Button::Normal).clicked() {
                     add = true;
@@ -776,7 +776,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui.label(tr("ui.parts_library_none"));
                 return;
             }
-            crate::ui_kit::search_field(ui, egui::Id::new("sc_parts_library_search"), &mut w.query, tr("ui.parts_library_search"));
+            crate::ui_kit::search_field(ui, egui::Id::unique("sc_parts_library_search"), &mut w.query, tr("ui.parts_library_search"));
             let height = crate::ui_kit::table_row_height() * 13.0;
             ui.horizontal_top(|ui| {
                 ui.allocate_ui(vec2(TREE_WIDTH, height), |ui| {
@@ -950,8 +950,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                 });
             });
-        },
-    );
+        });
     if refresh {
         let workers = w.workers.clone();
         for l in &mut w.libs {

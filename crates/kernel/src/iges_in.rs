@@ -17,12 +17,12 @@ pub const MAX_IGES_BYTES: usize = 512 << 20;
 /// Read STEP and IGES files up to `bytes` from now on (Preferences › General › Largest file to
 /// open, or `--max-file-size`, #4086); never below the defaults.
 pub fn set_max_import_bytes(bytes: usize) {
-    solidcraft_step::p21::set_max_bytes(bytes);
+    crate::step_in::p21::set_max_bytes(bytes);
 }
 
 /// The largest STEP or IGES file read now.
 pub fn max_import_bytes() -> usize {
-    solidcraft_step::p21::max_bytes().max(MAX_IGES_BYTES)
+    crate::step_in::p21::max_bytes().max(MAX_IGES_BYTES)
 }
 
 const MAX_ENTITIES: usize = 2_000_000;

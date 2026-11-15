@@ -12,9 +12,9 @@ use std::sync::mpsc::Receiver;
 use serde_json::{Value, json};
 
 use crate::SolveApp;
-use crate::i18n::{format, tr};
-use crate::theme::Tokens;
 use crate::ui_kit;
+use solidcraft_theme::Tokens;
+use solidcraft_ui_text::{format, tr};
 
 /// How often an open Versions tab looks at the folder again, in seconds.
 const EVERY: f64 = 3.0;
@@ -297,7 +297,7 @@ fn done(app: &mut SolveApp, after: After, result: Result<Value, String>) {
         After::Open | After::NewPart => {
             if let Some(file) = r["file"].as_str() {
                 if opens_here(file) {
-                    app.open_path(file);
+                    app.open_path_with(file, &serde_json::Map::new());
                 } else if let Some(open) = &app.services.open_file {
                     // A drawing, document or KiCad file: in its own program.
                     open(file);
@@ -487,7 +487,7 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui, v: &View, folder: &str) {
                 app.versions.soon();
             }
         }
-        ui_kit::text_area(ui, tr("ui.versions_message_hint"), egui::Id::new("sc_versions_message"), &mut app.versions.message, 2, 2000);
+        ui_kit::text_area(ui, tr("ui.versions_message_hint"), egui::Id::unique("sc_versions_message"), &mut app.versions.message, 2, 2000);
         if app.versions.message.is_empty() {
             ui_kit::text(ui, tr("ui.versions_message_hint"), ui_kit::Text::Hint("versions_message"));
         }
@@ -708,7 +708,7 @@ fn graph_row(ui: &mut egui::Ui, key: Option<&str>, row: &GraphRow, rail: (bool, 
         painter.circle_filled(node, if released { 4.5 } else { 4.0 }, color);
     }
     // Chips from the right: names, then revisions; the first line takes what is left.
-    let chip_font = crate::fonts::medium(t.font_micro);
+    let chip_font = crate::ui_kit::type_face::medium(t.font_micro);
     let mut right = body.right() - t.space_6;
     let chips = row.names.iter().map(|n| (n, t.accent_soft, t.accent)).chain(row.revisions.iter().map(|r| (r, t.form_success_fill, t.form_success)));
     for (text, fill, ink) in chips {
@@ -735,7 +735,7 @@ fn graph_row(ui: &mut egui::Ui, key: Option<&str>, row: &GraphRow, rail: (bool, 
     } else {
         t.text
     };
-    let font = if row.head || row.selected { crate::fonts::semibold(t.font_small) } else { egui::FontId::proportional(t.font_small) };
+    let font = if row.head || row.selected { crate::ui_kit::type_face::semibold(t.font_small) } else { egui::FontId::proportional(t.font_small) };
     let title = one_line(row.title, font, ink, right - left);
     painter.galley(egui::pos2(left, first_line - title.size().y / 2.0), title, ink);
     if two_lines {

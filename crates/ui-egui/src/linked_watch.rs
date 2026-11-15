@@ -13,7 +13,7 @@ use std::sync::mpsc::Receiver;
 use serde_json::{Value, json};
 
 use crate::SolveApp;
-use crate::i18n::{format, tr};
+use solidcraft_ui_text::{format, tr};
 
 /// How often the linked files are looked at, in seconds.
 const EVERY: f64 = 2.0;
@@ -205,10 +205,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if app.link_watch.notice.is_empty() {
         return;
     }
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let names: Vec<String> = app.link_watch.notice.iter().map(|c| c.name.clone()).collect();
     let (mut update_now, mut later) = (false, false);
-    let closed = crate::ui_kit::Window::new(egui::Id::new("sc_linked_update"), "update", tr("ui.linked_available_title"))
+    let closed = crate::ui_kit::Window::new(egui::Id::unique("sc_linked_update"), "update", tr("ui.linked_available_title"))
         .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-t.space_16, t.space_24 * 4.0))
         .show_body(ctx, |ui| {
             ui.label(tr("ui.linked_available"));

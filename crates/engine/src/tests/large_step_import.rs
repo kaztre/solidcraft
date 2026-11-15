@@ -147,6 +147,8 @@ fn raised_file_limits_let_larger_step_and_design_files_be_read() {
     // The preference raises both limits; the design is now read (and refused only for not being one).
     limits::set_preferred(FileLimits { step: GB, design: GB }).unwrap();
     assert_eq!((limits::max_step_bytes(), limits::max_design_bytes()), (1 << 30, 1 << 30));
+    // The STEP parser's own cap follows, so it doesn't refuse what the size check let in (#13329).
+    assert_eq!(solidcraft_kernel::step_max_bytes(), 1 << 30);
     assert!(limits::check(Kind::Step, 512 * MB + 1).is_ok());
     // The STEP and IGES readers parse up to the raised limit too, not only the file check before
     // them: a 625 MB STEP file passed the check and was then refused at 512 MB.
@@ -156,14 +158,16 @@ fn raised_file_limits_let_larger_step_and_design_files_be_read() {
     // The flag overrides the preference for the run, and the ceiling holds for both.
     limits::set_override(Some(2 * GB)).unwrap();
     assert_eq!(limits::effective(), FileLimits { step: 2 * GB, design: 2 * GB });
+    assert_eq!(solidcraft_kernel::step_max_bytes(), 2 << 30);
     assert_eq!(solidcraft_kernel::max_import_bytes(), 2 << 30);
     assert!(limits::set_override(Some(16 * GB + 1)).is_err());
     assert!(limits::set_preferred(FileLimits { step: 17 * GB, design: GB }).is_err());
     assert_eq!(limits::preferred(), FileLimits { step: GB, design: GB }, "a refused value changes nothing");
     assert_eq!(solidcraft_kernel::max_import_bytes(), 2 << 30, "a refused value changes nothing");
-    // Back to the defaults, the readers' limit falls back too.
-    limits::set_override(None).unwrap();
-    limits::set_preferred(FileLimits::DEFAULT).unwrap();
+    let _ = limits::set_override(None);
+    let _ = limits::set_preferred(FileLimits::DEFAULT);
+    assert_eq!(solidcraft_kernel::step_max_bytes(), 512 << 20, "the defaults put the parser's cap back");
+    // Back to the defaults, the IGES reader's limit falls back too.
     assert_eq!(solidcraft_kernel::max_import_bytes(), 512 << 20);
     let _ = std::fs::remove_dir_all(&dir);
 }
