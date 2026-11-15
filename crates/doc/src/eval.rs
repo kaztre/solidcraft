@@ -1460,12 +1460,25 @@ fn validation_digest(validation: kernel::Validation) -> u64 {
 /// SMLib's check of every body a feature made or changed (in `after`, not in `before`, the
 /// state it started from), once its steps left their checks to its end: the first that fails is
 /// the feature's error, naming the body.
-fn check_kept(before: &ModelState, after: &ModelState) -> kernel::Result<()> {
+///
+/// A body the check already refused before the feature (a part imported with defects) is kept
+/// when the feature leaves it failing no more tests than it came with: the feature is not what
+/// the check objects to, and refusing it left such a part impossible to cut or join at all
+/// (kaztre#15). The feature then carries a warning naming the body.
+fn check_kept(before: &ModelState, after: &ModelState, warning: &mut Option<String>) -> kernel::Result<()> {
     for b in &after.bodies {
         if before.bodies.iter().any(|old| old.body.same_shape(&b.body)) {
             continue;
         }
-        kernel::check_kept(&b.body).map_err(|e| kernel::KernelError::Failed(format!("body `{}`: {e}", b.name)))?;
+        let came_from = before.bodies.iter().find(|old| old.name == b.name).map(|old| &old.body);
+        match kernel::check_kept_from(&b.body, came_from) {
+            Ok(None) => {}
+            Ok(Some((was, now))) => append_warning(
+                warning,
+                format!("body `{}` already failed the modelling kernel's check before this feature ({was} problems, {now} now), so its result is kept unchecked", b.name),
+            ),
+            Err(e) => return Err(kernel::KernelError::Failed(format!("body `{}`: {e}", b.name))),
+        }
     }
     Ok(())
 }
@@ -2239,7 +2252,7 @@ impl Model {
                         e => kernel::KernelError::Failed(e.in_feature(&f.name).to_string()),
                     })?;
                     // The checks the feature's steps left to its end: the bodies it keeps.
-                    if deferred { check_kept(&state, &next) } else { Ok(()) }
+                    if deferred { check_kept(&state, &next, &mut warning) } else { Ok(()) }
                 }),
             };
             if r.is_ok() {

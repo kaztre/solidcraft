@@ -173,24 +173,57 @@ pub(crate) fn check_result(r: &solidcraft_smlib::Brep, how: Checked) -> std::res
     }
 }
 
+/// A body SMLib's check of what a feature keeps refuses ([`check_kept_counted`]).
+#[derive(Debug)]
+pub struct KeptRefusal {
+    /// How many tests of the check failed; `None` when the check itself could not run.
+    pub failures: Option<usize>,
+    /// The refusal, as [`check_kept`] gives it.
+    pub error: KernelError,
+}
+
 /// SMLib's full check of a body a feature keeps, once a step of the feature left its check to
 /// the end: an error with the check's reason unless it passes. A body decoded from a step's
 /// result is checked as that step would have checked it, on its result; any other (a copy moved
 /// into place, pieces joined without an operation) as SMLib takes it for the operations after it.
 /// A mesh body has nothing to check.
 pub fn check_kept(body: &Body) -> Result<()> {
+    check_kept_counted(body).map_err(|r| r.error)
+}
+
+/// [`check_kept`], with how many tests a refused body fails: a feature that changes a body the
+/// check already refused (a part imported with defects) can tell whether it made the body worse.
+pub fn check_kept_counted(body: &Body) -> std::result::Result<(), KeptRefusal> {
     if body.is_mesh() {
         return Ok(());
     }
     let step = body.unchecked.as_deref().and_then(|u| u.take(&body.record).map(|r| (u, r)));
     let (what, check) = match &step {
         Some((u, r)) => (u.what.as_str(), check_result(r, u.how)),
-        None => ("SMLib", body.smlib()?.check(solidcraft_smlib::CheckLevel::All).map_err(|e| format!("check: {e}"))),
+        None => match body.smlib() {
+            Ok(s) => ("SMLib", s.check(solidcraft_smlib::CheckLevel::All).map_err(|e| format!("check: {e}"))),
+            Err(error) => return Err(KeptRefusal { failures: None, error }),
+        },
     };
     match check {
         Ok(c) if c.is_valid() => Ok(()),
-        Ok(c) => Err(KernelError::Failed(format!("{what}: SMLib's check refuses the result: {c}"))),
-        Err(e) => Err(KernelError::Failed(format!("{what}: {e}"))),
+        Ok(c) => Err(KeptRefusal { failures: Some(c.failures), error: KernelError::Failed(format!("{what}: SMLib's check refuses the result: {c}")) }),
+        Err(e) => Err(KeptRefusal { failures: None, error: KernelError::Failed(format!("{what}: {e}")) }),
+    }
+}
+
+/// [`check_kept`] of a body a feature made from `before` (the body it changed, when there was
+/// one). A body the check refuses is still kept when `before` was refused already and the
+/// feature left it failing no more tests than it came with (a part imported with defects, cut
+/// or joined): the feature is not what the check objects to, and refusing it left such a part
+/// impossible to change at all (kaztre#15). `Some((was, now))` then gives the failed tests
+/// before and after, for the feature's warning; `None` is a body the check accepts.
+pub fn check_kept_from(body: &Body, before: Option<&Body>) -> Result<Option<(usize, usize)>> {
+    let Err(refused) = check_kept_counted(body) else { return Ok(None) };
+    let came_with = before.and_then(|b| check_kept_counted(b).err()).and_then(|r| r.failures);
+    match (came_with, refused.failures) {
+        (Some(was), Some(now)) if now <= was => Ok(Some((was, now))),
+        _ => Err(refused.error),
     }
 }
 
@@ -246,6 +279,26 @@ mod tests {
         assert!(check_kept(&joined).unwrap_err().to_string().contains("SMLib's check refuses the result"));
         let (off, deferred) = validating(Validation::Off, || crate::boolean(&bad, &tool, crate::BoolOp::Union));
         assert!(off.is_ok_and(|b| b.is_some()) && !deferred);
+    }
+
+    /// A body the check refused before a feature is kept when the feature made it no worse: the
+    /// same defective box moved is kept (with its failures before and after), while a sound box
+    /// turned into it is refused as before, and so is a refused body with nothing before it.
+    #[test]
+    fn a_body_no_worse_than_it_came_is_kept() {
+        use solidcore_record::Vec3;
+        let good = crate::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let mut record = good.record().clone();
+        record.vertices[0].point[2] += 0.5;
+        let bad = Body::from_record(record).unwrap();
+        let moved = crate::transform_matrix(&bad, [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [5.0, 0.0, 0.0, 1.0]]).unwrap();
+        let failures = check_kept_counted(&bad).unwrap_err().failures.unwrap();
+        assert!(failures > 0);
+        assert_eq!(check_kept_from(&moved, Some(&bad)).unwrap(), Some((failures, failures)));
+        assert_eq!(check_kept_from(&good, Some(&bad)).unwrap(), None);
+        let e = check_kept_from(&moved, Some(&good)).unwrap_err().to_string();
+        assert!(e.contains("SMLib's check refuses the result"), "{e}");
+        assert!(check_kept_from(&moved, None).is_err());
     }
 
     #[test]
