@@ -53,6 +53,15 @@ fn a_part_on_its_own_keeps_versions_checks_in_and_is_released() {
     assert_eq!(history["commits"][0]["revisions"], json!([{"path": "Tether clip.solidcraft", "revision": "Rev A"}]));
     let props = h.app.run("document.metadata", json!({})).unwrap_or_default();
     assert!(props.to_string().contains("Rev A"), "{props}");
+    // The history is a graph of rows: a click on a version's row picks it, another lets it go.
+    let row = std::format!("dialog:list:version:{}", history["commits"][0]["short"].as_str().unwrap());
+    h.frames(2);
+    h.step(&json!({"click": {"handle": row}})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.versions.selected.as_deref(), history["commits"][0]["id"].as_str());
+    h.step(&json!({"click": {"handle": row}})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.versions.selected, None);
 
     // A change shows in My changes, and restoring the first version puts it back.
     h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "body_name": "Tab"})).unwrap();

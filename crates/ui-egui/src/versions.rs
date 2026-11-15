@@ -584,36 +584,170 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui, v: &View, folder: &str) {
         if commits.is_empty() {
             ui_kit::text(ui, tr("ui.versions_no_history"), ui_kit::Text::Hint("versions_history"));
         }
-        for c in &commits {
-            let id = c["id"].as_str().unwrap_or("").to_string();
-            let mut line = c["message"].as_str().unwrap_or("").lines().next().unwrap_or("").to_string();
-            let names: Vec<String> = c["revisions"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter(|r| app.versions.scope == Scope::Folder || r["path"].as_str().is_some_and(|p| v.files.contains(p)))
-                .filter_map(|r| r["revision"].as_str().map(str::to_string))
-                .chain(c["versions"].as_array().into_iter().flatten().filter_map(|n| n.as_str().map(str::to_string)))
-                .collect();
-            if !names.is_empty() {
-                line = std::format!("{line}  [{}]", names.join("] ["));
+        // The history as a graph, as a version-control tree shows it: a rail down the left with
+        // a node for each version (the newest ringed, a released one in the release colour), its
+        // revisions and names as chips, and the changes not checked in yet as a hollow node on top.
+        let more = history["more"] == true;
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            if !changes.is_empty() && !commits.is_empty() {
+                let label = std::format!("{} ({})", tr("ui.versions_changes"), changes.len());
+                graph_row(ui, None, &GraphRow { title: &label, pending: true, ..Default::default() }, (false, true));
             }
-            let selected = app.versions.selected.as_deref() == Some(id.as_str());
-            if ui_kit::list_picker(ui, &std::format!("version:{}", c["short"].as_str().unwrap_or("")), &line, selected).clicked() {
-                app.versions.selected = if selected { None } else { Some(id.clone()) };
-                app.versions.confirm = None;
+            for (index, c) in commits.iter().enumerate() {
+                let id = c["id"].as_str().unwrap_or("").to_string();
+                let line = c["message"].as_str().unwrap_or("").lines().next().unwrap_or("");
+                let revisions: Vec<String> = c["revisions"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|r| app.versions.scope == Scope::Folder || r["path"].as_str().is_some_and(|p| v.files.contains(p)))
+                    .filter_map(|r| r["revision"].as_str().map(str::to_string))
+                    .collect();
+                let names: Vec<String> = c["versions"].as_array().into_iter().flatten().filter_map(|n| n.as_str().map(str::to_string)).collect();
+                let selected = app.versions.selected.as_deref() == Some(id.as_str());
+                let by =
+                    format("ui.versions_by", &[("author", c["author"].as_str().unwrap_or("")), ("when", &when(c["time"].as_i64().unwrap_or(0)))]);
+                let short = c["short"].as_str().unwrap_or("");
+                let last = index + 1 == commits.len() && !more;
+                let above = index > 0 || !changes.is_empty();
+                let row = GraphRow { title: line, by: &by, short, revisions: &revisions, names: &names, head: index == 0, selected, pending: false };
+                if graph_row(ui, Some(&std::format!("version:{short}")), &row, (above, !last)).clicked() {
+                    app.versions.selected = if selected { None } else { Some(id.clone()) };
+                    app.versions.confirm = None;
+                }
+                if selected {
+                    let under = ui
+                        .horizontal(|ui| {
+                            ui.add_space(GRAPH_GUTTER);
+                            ui.vertical(|ui| {
+                                ui.spacing_mut().item_spacing.y = t.space_3;
+                                ui.add_space(t.space_3);
+                                details(app, ui, v, folder, c, part_view);
+                                ui.add_space(t.space_4);
+                            });
+                        })
+                        .response
+                        .rect;
+                    if !last {
+                        let x = under.left() + GRAPH_GUTTER / 2.0;
+                        ui.painter()
+                            .line_segment([egui::pos2(x, under.top()), egui::pos2(x, under.bottom())], egui::Stroke::new(GRAPH_RAIL, t.accent));
+                    }
+                }
             }
-            let by = format("ui.versions_by", &[("author", c["author"].as_str().unwrap_or("")), ("when", &when(c["time"].as_i64().unwrap_or(0)))]);
-            ui_kit::text(ui, &by, ui_kit::Text::Hint("versions_by"));
-            if selected {
-                details(app, ui, v, folder, c, part_view);
-                ui.add_space(t.space_4);
-            }
-        }
-        if history["more"] == true {
+        });
+        if more {
             ui_kit::text(ui, tr("ui.versions_more"), ui_kit::Text::Hint("versions_history"));
         }
     });
+}
+
+/// Width of the history graph's rail column, and the rail's thickness.
+const GRAPH_GUTTER: f32 = 22.0;
+const GRAPH_RAIL: f32 = 2.0;
+
+/// One row of the history graph.
+#[derive(Default)]
+struct GraphRow<'a> {
+    title: &'a str,
+    by: &'a str,
+    short: &'a str,
+    revisions: &'a [String],
+    names: &'a [String],
+    /// The newest version: what the folder holds now.
+    head: bool,
+    selected: bool,
+    /// The changes not checked in yet: a hollow node, not a version.
+    pending: bool,
+}
+
+/// A row of the history graph: its node on the rail (`rail`: whether the rail runs on above and
+/// below it), the version's first line with its revision and name chips, and who checked it in
+/// and when underneath. `key` makes it a row to pick; the changes row has none.
+fn graph_row(ui: &mut egui::Ui, key: Option<&str>, row: &GraphRow, rail: (bool, bool)) -> egui::Response {
+    let t = Tokens::get();
+    let two_lines = !row.by.is_empty();
+    let height = if two_lines { t.font_small + t.font_caption + t.space_12 + t.space_4 } else { t.font_small + t.space_12 };
+    let sense = if key.is_some() { egui::Sense::click() } else { egui::Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), height), sense);
+    if let Some(key) = key {
+        crate::scenario::publish_target(&std::format!("dialog:list:{key}"), rect);
+    }
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
+    let painter = ui.painter_at(rect.expand(1.0));
+    let body = egui::Rect::from_min_max(egui::pos2(rect.left() + GRAPH_GUTTER, rect.top() + 1.0), egui::pos2(rect.right(), rect.bottom() - 1.0));
+    if row.selected {
+        painter.rect_filled(body, t.radius_md, t.selected_bg);
+    } else if key.is_some() && response.hovered() {
+        painter.rect_filled(body, t.radius_md, t.hover);
+    }
+    // The rail and the node.
+    let first_line = rect.top() + t.space_6 + t.font_small / 2.0;
+    let node = egui::pos2(rect.left() + GRAPH_GUTTER / 2.0, first_line);
+    let rail_color = if row.pending { t.text_dim } else { t.accent };
+    if rail.0 {
+        painter.line_segment([egui::pos2(node.x, rect.top() - 1.0), node], egui::Stroke::new(GRAPH_RAIL, t.accent));
+    }
+    if rail.1 {
+        painter.line_segment([node, egui::pos2(node.x, rect.bottom() + 1.0)], egui::Stroke::new(GRAPH_RAIL, rail_color));
+    }
+    let released = !row.revisions.is_empty();
+    let color = if released { t.form_success } else { t.accent };
+    if row.pending {
+        painter.circle_filled(node, 4.5, t.panel);
+        painter.circle_stroke(node, 4.5, egui::Stroke::new(1.5, t.text_dim));
+    } else if row.head {
+        painter.circle_filled(node, 7.0, t.panel);
+        painter.circle_stroke(node, 6.5, egui::Stroke::new(1.5, color));
+        painter.circle_filled(node, 3.5, color);
+    } else {
+        painter.circle_filled(node, 5.5, t.panel);
+        painter.circle_filled(node, if released { 4.5 } else { 4.0 }, color);
+    }
+    // Chips from the right: names, then revisions; the first line takes what is left.
+    let chip_font = crate::fonts::medium(t.font_micro);
+    let mut right = body.right() - t.space_6;
+    let chips = row.names.iter().map(|n| (n, t.accent_soft, t.accent)).chain(row.revisions.iter().map(|r| (r, t.form_success_fill, t.form_success)));
+    for (text, fill, ink) in chips {
+        let galley = painter.layout_no_wrap(text.clone(), chip_font.clone(), ink);
+        let size = egui::vec2(galley.size().x + t.space_8, t.font_micro + t.space_6);
+        if right - size.x < body.left() + body.width() * 0.4 {
+            break;
+        }
+        let chip = egui::Rect::from_center_size(egui::pos2(right - size.x / 2.0, first_line), size);
+        painter.rect_filled(chip, size.y / 2.0, fill);
+        painter.galley(chip.center() - galley.size() / 2.0, galley, ink);
+        right = chip.left() - t.space_4;
+    }
+    let one_line = |text: &str, font: egui::FontId, color: egui::Color32, width: f32| {
+        let mut job = egui::text::LayoutJob::simple_singleline(text.to_owned(), font, color);
+        job.wrap = egui::text::TextWrapping { max_width: width.max(0.0), max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+        painter.layout_job(job)
+    };
+    let left = body.left() + t.space_6;
+    let ink = if row.selected {
+        t.selected_ink
+    } else if row.pending {
+        t.text_dim
+    } else {
+        t.text
+    };
+    let font = if row.head || row.selected { crate::fonts::semibold(t.font_small) } else { egui::FontId::proportional(t.font_small) };
+    let title = one_line(row.title, font, ink, right - left);
+    painter.galley(egui::pos2(left, first_line - title.size().y / 2.0), title, ink);
+    if two_lines {
+        let second = first_line + t.font_small / 2.0 + t.space_4 + t.font_caption / 2.0;
+        let dim = if row.selected { t.selected_ink } else { t.text_dim };
+        let id = painter.layout_no_wrap(row.short.to_owned(), egui::FontId::monospace(t.font_micro), dim);
+        let id_left = body.right() - t.space_6 - id.size().x;
+        let by = one_line(row.by, egui::FontId::proportional(t.font_caption), dim, id_left - t.space_6 - left);
+        painter.galley(egui::pos2(left, second - by.size().y / 2.0), by, dim);
+        painter.galley(egui::pos2(id_left, second - id.size().y / 2.0), id, dim);
+    }
+    response.on_hover_text(row.title)
 }
 
 /// The picked version: its files and what can be done with it.
