@@ -235,6 +235,29 @@ fn an_m14_thread_on_a_14_6_mm_boss_is_refused_with_the_size_to_make_it() {
     assert!((volume(&mut s, "Part") - before).abs() < 1e-9);
 }
 
+/// With `fit_hole` (the dialog's default) the same boss is turned down to the size first, as a
+/// hole is made its tap drill, and takes the thread: a shaft that is not a standard size no
+/// longer refuses every size (kaztre#6, a 44 mm shaft offered M42).
+#[test]
+fn a_shaft_too_thick_for_its_size_is_turned_down_to_it() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [-10, -10, 0], "length": 20, "width": 20, "height": 4, "body_name": "Part"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 7.3, "height": 15, "base": [0, 0, 4], "operation": "join", "targets": ["Part"]}));
+    let before = volume(&mut s, "Part");
+    let r = run(&mut s, "solid.thread", json!({"face": [7.3, 0, 17], "designation": "M14", "length": 10, "modeled": true, "fit_hole": true}));
+    let warning = r["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("the 14.6 mm shaft was turned down to 14 mm, the major diameter of M14"), "{r}");
+    // More than the ring turned off is gone (the groove too), and the boss's root is still there.
+    let ring = std::f64::consts::PI * (7.3f64.powi(2) - 7.0f64.powi(2)) * 10.0;
+    let removed = before - volume(&mut s, "Part");
+    assert!(removed > ring && removed < ring + std::f64::consts::PI * 7.0f64.powi(2) * 10.0 * 0.3, "{removed} vs {ring}");
+    // A shaft already the size is left as it is.
+    let mut exact = Session::default();
+    run(&mut exact, "solid.cylinder", json!({"radius": 7, "height": 15, "body_name": "Part"}));
+    let r = run(&mut exact, "solid.thread", json!({"face": [7, 0, 10], "from": [7, 0, 15], "designation": "M14", "length": 10, "modeled": true, "fit_hole": true}));
+    assert!(!r["warning"].as_str().unwrap_or_default().contains("turned down"), "{r}");
+}
+
 /// A shaft thinner than the thread's minor diameter is refused, and so is a thread on a shaft
 /// far thicker than it.
 #[test]

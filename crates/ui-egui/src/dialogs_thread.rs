@@ -434,7 +434,7 @@ pub(crate) fn rows(
     let before = designation.trim().is_empty() || suggested.as_deref() == Some(designation.as_str());
     let mut automatic = before;
     crate::ui_kit::section(ui, "thread_options", "Options", true, |ui| {
-        crate::ui_kit::checkbox_grid(ui, &mut [("Modeled", modeled), ("Resize hole to tap drill", &mut o.fit_hole), ("Flip start", &mut o.flip)], 2);
+        crate::ui_kit::checkbox_grid(ui, &mut [("Modeled", modeled), ("Resize hole or shaft to fit", &mut o.fit_hole), ("Flip start", &mut o.flip)], 2);
         crate::ui_kit::checkbox_grid(ui, &mut [("3D printed", &mut o.printed)], 2);
         if o.printed {
             enter |= hint_row(ui, "Print clearance", &mut o.clearance, tr("thread.print_clearance_hint"));

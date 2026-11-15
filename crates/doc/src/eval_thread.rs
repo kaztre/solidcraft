@@ -845,11 +845,17 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
 /// the drill's radius into the wall added. Bored, it runs a pitch past a free end into the air and
 /// stops a quarter pitch short of a closed one, clear of a blind hole's bottom; filled, it stops
 /// at a free end and runs a quarter pitch into the material past a closed one. A hole that is the
-/// drill already, a shaft and a taper thread are left as they are. Says what it did in `warning`.
+/// drill already and a taper thread are left as they are. A shaft thicker than the size's major
+/// diameter is turned down to it ([`turn_down`]), as a lathe would before the die: a 44 mm shaft
+/// takes M42, where a modelled thread refused it as too thick (kaztre#6). Says what it did in
+/// `warning`.
 fn fit_hole(st: &mut ModelState, on: &mut ThreadOn, warning: &mut Option<String>) -> Result<()> {
     let t = &on.info;
-    if !t.internal || t.form.is_taper() {
+    if t.form.is_taper() {
         return Ok(());
+    }
+    if !t.internal {
+        return turn_down(st, on, warning);
     }
     let radius = on.cyl.radius;
     let p = t.pitch;
@@ -900,8 +906,9 @@ fn fit_hole(st: &mut ModelState, on: &mut ThreadOn, warning: &mut Option<String>
     Ok(())
 }
 
-/// Turns a shaft down by its thread's print clearance over the threaded length, so its crests
-/// move away from the nut with the rest of the tooth: a ring from the moved crest out past the
+/// Turns a shaft down to its thread's major diameter, less its print clearance, over the
+/// threaded length, so a thicker shaft takes the thread and a printed one's crests move away
+/// from the nut with the rest of the tooth: a ring from the crest out past the
 /// surface, revolved about the axis and cut. Past a free end it runs a pitch out into the air; at
 /// a shoulder it stops a quarter pitch short. A shaft no wider than the moved crest is left alone.
 fn turn_down(st: &mut ModelState, on: &mut ThreadOn, warning: &mut Option<String>) -> Result<()> {
@@ -939,14 +946,14 @@ fn turn_down(st: &mut ModelState, on: &mut ThreadOn, warning: &mut Option<String
         kernel::boolean(&input.body, &ring, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("turning the shaft down removed everything".into()))?;
     let unnamed = crate::lineage::Lineage::unnamed_faces(faces);
     let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&cut, &[&l, &unnamed]));
+    let (from, to) = (show_mm(2.0 * radius), show_mm(2.0 * crest));
     append_warning(
         warning,
-        format!(
-            "the {} mm shaft was turned down to {} mm for {} mm print clearance",
-            show_mm(2.0 * radius),
-            show_mm(2.0 * crest),
-            show_mm(t.clearance)
-        ),
+        if t.clearance > 0.0 {
+            format!("the {from} mm shaft was turned down to {to} mm for {} mm print clearance", show_mm(t.clearance))
+        } else {
+            format!("the {from} mm shaft was turned down to {to} mm, the major diameter of {}", t.designation)
+        },
     );
     if let Some(slot) = st.bodies.get_mut(i) {
         *slot = ModelBody::traced_new(mb.name, Traced { body: cut, lineage }, mb.feature);

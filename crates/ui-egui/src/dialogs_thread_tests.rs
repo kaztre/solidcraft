@@ -91,7 +91,7 @@ fn every_option_reaches_the_command() {
             "modeled": true, "flip": true, "fit_hole": true,
         })
     );
-    click(&mut h, &["dialog:Resize hole to tap drill"]);
+    click(&mut h, &["dialog:Resize hole or shaft to fit"]);
     assert!(params(&h).get("fit_hole").is_none(), "unticked, the hole is left as it is");
     click(&mut h, &["dialog:3D printed"]);
     assert_eq!(params(&h)["print_clearance"], "0.075 mm", "a printed thread starts with 0.075 mm clearance");
