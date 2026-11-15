@@ -209,6 +209,7 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
     let (mut faces, mut edges, mut vertices) = (0, 0, 0);
     let mut placement_count = 0;
     let mut skipped = 0;
+    let mut unmeasured: Vec<Value> = Vec::new();
     let selected_placements = if selected.is_empty() {
         subtree(doc, (0, Vec::new(), solidcraft_doc::IDENTITY), descendants, cmd)?
     } else {
@@ -254,7 +255,20 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
             }
             done += 1;
             let transform: Mat = doc.model_body_offset(body).map(|offset| solidcraft_doc::mat_mul(&transform, offset)).unwrap_or(transform);
-            let measured = measure_placed(body, transform)?;
+            // A body the modelling kernel cannot measure (an imported part it does not take) is
+            // left out and named, where it failed the whole command: Properties of an assembly
+            // with one such part showed only the kernel's error (kaztre#4).
+            #[cfg(test)]
+            let measured = if work::refused(&body.name) { Err(bad(cmd, "refused for the test")) } else { measure_placed(body, transform) };
+            #[cfg(not(test))]
+            let measured = measure_placed(body, transform);
+            let measured = match measured {
+                Ok(m) => m,
+                Err(e) => {
+                    unmeasured.push(json!({"name": body.name, "component": component, "path": path, "reason": e.to_string()}));
+                    continue;
+                }
+            };
             let density = doc.density(&body.name);
             let body_mass = measured.volume * density / 1000.0;
             let closed = measured.closed;
@@ -289,6 +303,12 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
     if let Some(w) = &watch {
         w.progress("measuring", done, total_bodies);
     }
+    // Nothing measured at all: the reason is the answer, as before.
+    if bodies.is_empty()
+        && let Some(reason) = unmeasured.first().and_then(|u| u["reason"].as_str())
+    {
+        return Err(crate::EngineError::Other(reason.to_string()));
+    }
     if !(volume.is_finite() && area.is_finite() && mass.is_finite() && moment.is_finite()) {
         return Err(bad(cmd, "physical properties exceed supported numeric range"));
     }
@@ -313,6 +333,10 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
             "center_of_mass": centroid, "first_moment_g_mm": moment, "inertia_g_mm2": at_centre,
             "principal_moments_g_mm2": principal.map(|(moments, _)| moments), "principal_axes": principal.map(|(_, axes)| axes),
             "bbox": bbox, "faces": faces, "edges": edges, "vertices": vertices}});
+    if !unmeasured.is_empty() {
+        out["total"]["unmeasured_bodies"] = json!(unmeasured.len());
+        out["unmeasured"] = Value::Array(unmeasured);
+    }
     if let Some(point) = about {
         let shifted =
             centroid.zip(at_centre).map(|(c, i)| inertia::shifted(&i, mass, point - c)).filter(|i| i.iter().flatten().all(|x| x.is_finite()));
@@ -336,6 +360,23 @@ pub(super) mod work {
 
     thread_local! {
         static WORK: Cell<Work> = const { Cell::new(Work { placed_measures: 0, spreads: 0 }) };
+    }
+
+    thread_local! {
+        static REFUSED: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    }
+
+    /// While `f` runs on this thread, the body named `name` cannot be measured (as a part the
+    /// modelling kernel does not take).
+    pub fn refusing<T>(name: &str, f: impl FnOnce() -> T) -> T {
+        REFUSED.with(|r| *r.borrow_mut() = Some(name.to_string()));
+        let out = f();
+        REFUSED.with(|r| *r.borrow_mut() = None);
+        out
+    }
+
+    pub(super) fn refused(name: &str) -> bool {
+        REFUSED.with(|r| r.borrow().as_deref() == Some(name))
     }
 
     pub(super) fn count(f: impl FnOnce(&mut Work)) {

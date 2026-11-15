@@ -502,3 +502,27 @@ fn a_watcher_sees_the_bodies_measured_and_can_stop_them() {
     let stopped = solidcraft_doc::progress::watch(progress, || s.execute("component.properties", &json!({"component": "root"})));
     assert!(stopped.unwrap_err().to_string().contains("cancelled"));
 }
+
+/// One part the modelling kernel cannot measure does not fail Properties of the assembly: the
+/// other bodies are measured, and the part is named with the reason (kaztre#4). With nothing
+/// measured the reason is the error, as before.
+#[test]
+fn a_body_that_cannot_be_measured_is_left_out_and_named() {
+    let mut s = Session::default();
+    let (_, _, good) = box_in(&mut s, "Good");
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let (bad_component, bad_occurrence, bad) = box_in(&mut s, "Bad");
+    assert_ne!(good, bad);
+    let root = super::work::refusing(&bad, || run(&mut s, "component.properties", json!({"component": "root"})));
+    assert_eq!(root["body_count"], 1);
+    close(&root["total"]["volume_mm3"], 1000.0);
+    assert_eq!(root["total"]["unmeasured_bodies"], 1);
+    assert_eq!(root["unmeasured"][0]["name"], json!(bad));
+    assert_eq!(root["unmeasured"][0]["component"], json!(bad_component));
+    assert!(root["unmeasured"][0]["reason"].as_str().is_some_and(|r| !r.is_empty()));
+    let alone = super::work::refusing(&bad, || s.execute("occurrence.properties", &json!({"occurrence": bad_occurrence})));
+    assert!(alone.is_err(), "{alone:?}");
+    let all = run(&mut s, "component.properties", json!({"component": "root"}));
+    assert_eq!(all["body_count"], 2);
+    assert!(all["total"].get("unmeasured_bodies").is_none() && all.get("unmeasured").is_none());
+}

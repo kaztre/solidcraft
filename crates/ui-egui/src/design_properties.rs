@@ -386,6 +386,10 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
     if skipped > 0 && skipped < bodies.len() as u64 {
         rows.push(("Open bodies (no volume)", skipped.to_string()));
     }
+    // Parts the modelling kernel could not measure are left out of every figure here.
+    if let Some(unmeasured) = total["unmeasured_bodies"].as_u64().filter(|n| *n > 0) {
+        rows.push(("Bodies not measured", unmeasured.to_string()));
+    }
     rows.push(("Area", crate::prefs::show_mm(app, number(total, "area_mm2"), 2)));
     let geometry = if total.get("center_of_mass").is_some() { Some(total) } else { bodies.first().filter(|_| bodies.len() == 1) };
     if let Some(b) = geometry {
