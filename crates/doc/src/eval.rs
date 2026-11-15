@@ -1475,7 +1475,10 @@ fn check_kept(before: &ModelState, after: &ModelState, warning: &mut Option<Stri
             Ok(None) => {}
             Ok(Some((was, now))) => append_warning(
                 warning,
-                format!("body `{}` already failed the modelling kernel's check before this feature ({was} problems, {now} now), so its result is kept unchecked", b.name),
+                format!(
+                    "body `{}` already failed the modelling kernel's check before this feature ({was} problems, {now} now), so its result is kept unchecked",
+                    b.name
+                ),
             ),
             Err(e) => return Err(kernel::KernelError::Failed(format!("body `{}`: {e}", b.name))),
         }

@@ -1019,9 +1019,11 @@ preference_settings! {
     default_units: String = "mm".into(), PAGE_DESIGN;
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
     nav: String = "fusion".into(), PAGE_NAVIGATION;
-    /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
-    /// Independent of mouse bindings; false also preserves existing saved presets' behavior.
-    free_orbit: bool = false, PAGE_NAVIGATION;
+    /// Rotation through both poles with roll, without the Shift axis-snap spring. Independent
+    /// of mouse bindings. On by default in this fork's app (kaztre#7); false is the turntable
+    /// orbit, and settings saved with it keep it. The tests keep upstream's default (off), which
+    /// the navigation tests are written against.
+    free_orbit: bool = !cfg!(test), PAGE_NAVIGATION;
     /// With free orbit, mouse drags turn sideways about the world's up axis (a turntable without
     /// the pole limit) instead of the screen's.
     free_orbit_upright: bool = false, PAGE_NAVIGATION => check_tr("nav.free_orbit_upright.label");

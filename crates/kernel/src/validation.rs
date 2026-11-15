@@ -207,7 +207,9 @@ pub fn check_kept_counted(body: &Body) -> std::result::Result<(), KeptRefusal> {
     };
     match check {
         Ok(c) if c.is_valid() => Ok(()),
-        Ok(c) => Err(KeptRefusal { failures: Some(c.failures), error: KernelError::Failed(format!("{what}: SMLib's check refuses the result: {c}")) }),
+        Ok(c) => {
+            Err(KeptRefusal { failures: Some(c.failures), error: KernelError::Failed(format!("{what}: SMLib's check refuses the result: {c}")) })
+        }
         Err(e) => Err(KeptRefusal { failures: None, error: KernelError::Failed(format!("{what}: {e}")) }),
     }
 }

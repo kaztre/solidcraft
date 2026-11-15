@@ -619,3 +619,18 @@ fn navigation_board_drops_menu_value_text_before_folding_slots() {
     assert!(!folded.values && !folded.overflow.is_empty());
     assert_eq!(folded.more.size(), vec2(32.0, 32.0));
 }
+
+/// The orbit style is switched from the bar's Display menu as well as in Preferences (kaztre#7).
+#[test]
+fn the_display_menu_switches_the_orbit_style() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.free_orbit = false;
+    h.settle();
+    let view = crate::scenario::handle_at("nav:view").unwrap();
+    h.call("ui.click", json!({"x": view.x, "y": view.y}));
+    for (handle, free) in [("view:free_orbit", true), ("view:turntable", false)] {
+        let row = crate::scenario::handle_at(handle).unwrap();
+        h.call("ui.click", json!({"x": row.x, "y": row.y}));
+        assert_eq!(h.app.preferences.free_orbit, free, "{handle}");
+    }
+}

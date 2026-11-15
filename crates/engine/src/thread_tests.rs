@@ -254,7 +254,11 @@ fn a_shaft_too_thick_for_its_size_is_turned_down_to_it() {
     // A shaft already the size is left as it is.
     let mut exact = Session::default();
     run(&mut exact, "solid.cylinder", json!({"radius": 7, "height": 15, "body_name": "Part"}));
-    let r = run(&mut exact, "solid.thread", json!({"face": [7, 0, 10], "from": [7, 0, 15], "designation": "M14", "length": 10, "modeled": true, "fit_hole": true}));
+    let r = run(
+        &mut exact,
+        "solid.thread",
+        json!({"face": [7, 0, 10], "from": [7, 0, 15], "designation": "M14", "length": 10, "modeled": true, "fit_hole": true}),
+    );
     assert!(!r["warning"].as_str().unwrap_or_default().contains("turned down"), "{r}");
 }
 

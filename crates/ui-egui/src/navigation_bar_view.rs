@@ -537,6 +537,18 @@ fn display_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
             toggle_projection(app);
         }
     }
+    // The orbit style, switched here as well as in Preferences ▸ Navigation (kaztre#7).
+    separator(ui);
+    heading(ui, app.tr("prefs.navigation.orbit_style"));
+    for (free, key) in [(false, "prefs.navigation.turntable"), (true, "prefs.navigation.free")] {
+        let mut item = NavigationMenuRow::new(key, app.tr(key), "orbit");
+        item.selected = app.preferences.free_orbit == free;
+        let response = item.show(ui).on_hover_text(app.tr("nav.free_orbit.snap_help"));
+        crate::scenario::publish_target(if free { "view:free_orbit" } else { "view:turntable" }, response.rect);
+        if response.clicked() {
+            app.preferences.free_orbit = free;
+        }
+    }
     separator(ui);
     for (id, label, on) in [
         ("auto_ortho_faces", "Perspective while orbiting, ortho on faces", app.ui.auto_ortho_faces),
