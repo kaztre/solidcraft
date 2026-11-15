@@ -817,14 +817,30 @@ fn hole_wall(s: &Session, a: Vec3) -> Option<(Vec3, Vec3)> {
     // Picks are in world coordinates, including rims on already placed standard parts.
     let st = s.world_state().ok()?;
     let dirs = [Vec3::Z * -1.0, Vec3::Z, Vec3::X, Vec3::X * -1.0, Vec3::Y, Vec3::Y * -1.0];
-    for step in [0.2, 0.5, 1.0, 2.0] {
-        for b in &st.bodies {
+    // Only a body whose box reaches the pick can have the hole (a hole's wall lies within the
+    // box of its rims, which the box of the body's edges holds): asking every body of an
+    // assembly for its face there took seconds (kaztre#9).
+    const REACH: f64 = 2.0;
+    let near: Vec<_> = st
+        .bodies
+        .iter()
+        .filter(|b| {
+            let bb = b.body.outline_bounds();
+            let c = Vec3::new(a.x.clamp(bb.min.x, bb.max.x), a.y.clamp(bb.min.y, bb.max.y), a.z.clamp(bb.min.z, bb.max.z));
+            c.dist(a) <= REACH
+        })
+        .collect();
+    for step in [0.2, 0.5, 1.0, REACH] {
+        for b in &near {
             for d in dirs {
                 let q = a + d * step;
                 if let Some(c) = solidcraft_doc::kernel::cylinder_face_at(&b.body, q) {
                     let v = q - c.axis_point;
                     let along = v.dot(c.axis);
-                    let on_wall = ((v - c.axis * along).len() - c.radius).abs() < 1e-3 && along > c.start && along < c.end;
+                    // A point clicked in the window lies on a facet of the drawn wall, a little
+                    // inside the cylinder itself, so the wall is met within a facet's sag.
+                    let sag = (c.radius * 0.02).clamp(1e-3, 0.05);
+                    let on_wall = ((v - c.axis * along).len() - c.radius).abs() < sag && along > c.start && along < c.end;
                     if on_wall {
                         return Some((q, c.axis_point + c.axis * along));
                     }
@@ -1136,6 +1152,26 @@ mod tests {
         let (lo, hi) = bbox(&s, "SHCS M8x25");
         assert!((hi.z - 18.0).abs() < 1e-6 && (lo.z + 15.0).abs() < 1e-6, "{lo:?} {hi:?}");
         assert!(s.model.state().threads.iter().any(|t| t.designation == "M8" && (t.pitch - 1.25).abs() < 1e-9));
+    }
+
+    /// A hole in a part that sits inside another part's box (a board in a housing): the screw
+    /// seats on the part with the hole, from a point clicked on the drawn wall, which lies on a
+    /// facet a little inside the cylinder itself (kaztre#9).
+    #[test]
+    fn a_screw_seats_in_a_part_inside_another_parts_box() {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"diameter": 100, "height": 40, "body_name": "Housing"}));
+        run(&mut s, "solid.cylinder", json!({"diameter": 90, "height": 40, "operation": "cut", "targets": ["Housing"]}));
+        let board = run(&mut s, "component.create", json!({"name": "Board"}));
+        run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Plate"}));
+        run(&mut s, "solid.hole", json!({"position": [10, 10, 10], "diameter": 6.4}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+        let screw = run(&mut s, "parts.fastener", json!({"family": "socket_head_cap_screw", "size": "M6", "length": 20, "at": [13.196, 10, 6]}));
+        let joint = s.doc.assembly.joints.iter().find(|j| Some(j.id) == screw["joint"].as_u64()).unwrap();
+        assert_eq!(Some(joint.a.occurrence), board["occurrence"].as_u64());
+        let (lo, hi) = bbox(&s, "SHCS M6x20");
+        assert!((hi.z - 16.0).abs() < 1e-6 && (lo.z + 10.0).abs() < 1e-6, "{lo:?} {hi:?}");
+        assert!(((lo.x + hi.x) / 2.0 - 10.0).abs() < 1e-6 && ((lo.y + hi.y) / 2.0 - 10.0).abs() < 1e-6, "{lo:?} {hi:?}");
     }
 
     #[test]

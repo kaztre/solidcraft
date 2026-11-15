@@ -335,7 +335,10 @@ pub(crate) fn occurrence_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result
     s.doc.find_component(&key).and_then(|c| s.doc.occurrence_of(c)).map(|o| o.id).ok_or_else(|| bad(cmd, format!("no occurrence `{key}`")))
 }
 
-/// The occurrence whose bodies are nearest a world point (0 = root bodies).
+/// The occurrence whose bodies are nearest a world point (0 = root bodies): nearest by a body's
+/// surface, not its box. In an assembly the boxes of many parts hold a point on one of them (a
+/// board, a housing, a screw in the hole picked), and the first such box named the wrong part
+/// (kaztre#9). The box only rules out bodies further than the nearest surface found so far.
 pub(crate) fn occurrence_at(s: &Session, p: Vec3) -> Option<u64> {
     let st = s.model.state();
     let mut best: Option<(f64, u64)> = None;
@@ -346,9 +349,26 @@ pub(crate) fn occurrence_at(s: &Session, p: Vec3) -> Option<u64> {
             let t = if occ == 0 { solidcraft_doc::IDENTITY } else { joints::occurrence_world(&s.doc, occ) };
             let inv = solidcraft_doc::mat_inverse(&t)?;
             let q = solidcraft_doc::apply_point(&inv, p);
-            let bb = b.mesh().bounds();
+            // A body moved in from another component is kept in its own coordinates, placed by
+            // its offset (as a joint's face on it is found).
+            let q = match s.doc.model_body_offset(b) {
+                Some(m) => solidcraft_doc::apply_point(&solidcraft_doc::mat_inverse(m)?, q),
+                None => q,
+            };
+            let mesh = b.mesh();
+            let bb = mesh.bounds();
             let c = Vec3::new(q.x.clamp(bb.min.x, bb.max.x), q.y.clamp(bb.min.y, bb.max.y), q.z.clamp(bb.min.z, bb.max.z));
-            let d = c.dist(q);
+            if best.is_some_and(|(bd, _)| c.dist(q) >= bd) {
+                continue;
+            }
+            let d = mesh
+                .triangles
+                .iter()
+                .filter_map(|t| mesh.tri(t))
+                .map(|[a, bb, c]| solidcraft_geom::compare::closest_on_triangle(q, a, bb, c).dist(q))
+                .fold(f64::INFINITY, f64::min);
+            // A body with nothing drawn (no face could be meshed) is as near as its box.
+            let d = if d.is_finite() { d } else { c.dist(q) };
             if best.is_none_or(|(bd, _)| d < bd) {
                 best = Some((d, occ));
             }
