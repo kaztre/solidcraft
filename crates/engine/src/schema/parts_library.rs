@@ -5,9 +5,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// A non-blank text, with the handler's message for anything else.
-fn folder<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+fn folder<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     match Value::deserialize(d)? {
-        Value::String(s) if !s.trim().is_empty() && s.len() < 4096 => Ok(s),
+        Value::Null => Ok(None),
+        Value::String(s) if !s.trim().is_empty() && s.len() < 4096 => Ok(Some(s)),
         _ => Err(serde::de::Error::custom("must be a folder path")),
     }
 }
@@ -33,9 +34,10 @@ fn limit<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct PartsSearchParams {
-    /// The library folder. Its sub-folders are the library's categories.
-    #[serde(deserialize_with = "folder")]
-    pub folder: String,
+    /// The library folder. Its sub-folders are the library's categories. Default: every parts
+    /// library the user set up in the Parts Library window (the assistant's, in the app).
+    #[serde(default, deserialize_with = "folder")]
+    pub folder: Option<String>,
     /// Words that must all appear in a part's name, folders, file type, part number or
     /// description, any case (`_` in names counts as a space). Default: every part.
     #[serde(default, deserialize_with = "query")]
@@ -74,7 +76,11 @@ pub struct LibraryPart {
 /// The parts that matched.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct PartsSearchReply {
+    /// The folder searched: the one named, or the first of the user's libraries.
     pub folder: String,
+    /// Every library searched, when the call named no folder.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub libraries: Vec<String>,
     /// Best matches first, then by folder and name.
     pub parts: Vec<LibraryPart>,
     /// How many parts matched (more than `parts` when the limit cut the list).

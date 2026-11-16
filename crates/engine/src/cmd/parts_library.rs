@@ -28,10 +28,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SEARCH_CONTRACT)
         .output(output_schema_for::<PartsSearchReply>)
         .params(
-            "folder: the library folder (its sub-folders are categories; a part's STEP, IGES and design files with one name are one \
+            "folder?: the library folder (default: every parts library the user set up in the Parts Library window; its sub-folders are categories; a part's STEP, IGES and design files with one name are one \
          part, the design first; meshes, drawings and SolidWorks files are left out); query?: words that must all appear in a \
          part's name, folders, file type, part number or description (default: every part); limit?: most parts returned \
-         (default 200, at most 5000) → folder, parts: [{path, file, name, folder, kind: design|cad, format, bytes, part_number?, \
+         (default 200, at most 5000) → folder, libraries? (those searched, when no folder was named), parts: [{path, file, name, folder, kind: design|cad, format, bytes, part_number?, \
          description?, revision?}] best first, matched, total, truncated. Never changes the design",
         ),
     CommandSpec::new("library.parts.convert", "Convert to Library Part", crate::checked!("library.parts.convert", convert))
@@ -51,8 +51,21 @@ pub static COMMANDS: &[CommandSpec] = &[
 
 fn search(_s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "library.parts.search";
-    let folder =
-        p.get("folder").and_then(Value::as_str).filter(|f| !f.trim().is_empty() && f.len() < 4096).ok_or_else(|| bad(cmd, "`folder` is required"))?;
+    // The folder named, or every library the user set up (which the app says: `project`).
+    let named = match p.get("folder") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(v.as_str().filter(|f| !f.trim().is_empty() && f.len() < 4096).ok_or_else(|| bad(cmd, "`folder` must be a folder path"))?),
+    };
+    let folders: Vec<String> = match named {
+        Some(f) => vec![f.to_string()],
+        None => crate::project::libraries().iter().map(|f| f.to_string_lossy().into_owned()).collect(),
+    };
+    if folders.is_empty() {
+        return Err(bad(
+            cmd,
+            "`folder` is required: no parts library is set up (Parts Library, Add Library), or the assistant may not use it (Preferences, AI)",
+        ));
+    }
     let query = match p.get("query") {
         None | Some(Value::Null) => "",
         Some(Value::String(q)) => q.as_str(),
@@ -63,33 +76,45 @@ fn search(_s: &mut Session, p: &Value) -> Result<Value> {
         Some(v) => v.as_u64().filter(|n| *n > 0).ok_or_else(|| bad(cmd, "`limit` must be a whole number of parts, 1 or more"))?.min(MAX_LIMIT as u64)
             as usize,
     };
-    let library = parts_library::scan(folder).map_err(|e| bad(cmd, e.to_string()))?;
-    let (found, matched) = parts_library::search(&library, query, limit);
-    let parts = found
-        .into_iter()
-        .map(|e| LibraryPart {
-            path: e.path.clone(),
-            file: library.absolute(e).to_string_lossy().into_owned(),
-            name: e.name.clone(),
-            folder: e.folder.clone(),
-            kind: match e.kind {
-                Kind::Design => "design",
-                Kind::Cad => "cad",
+    let (mut parts, mut matched, mut total, mut truncated) = (Vec::new(), 0u64, 0u64, false);
+    for folder in &folders {
+        // One library that can't be read (a drive not connected) does not hide the others.
+        let library = match parts_library::scan(folder) {
+            Ok(library) => library,
+            Err(e) if folders.len() == 1 => return Err(bad(cmd, e.to_string())),
+            Err(_) => continue,
+        };
+        let (found, hits) = parts_library::search(&library, query, limit);
+        parts.extend(found.into_iter().map(|e| {
+            LibraryPart {
+                path: e.path.clone(),
+                file: library.absolute(e).to_string_lossy().into_owned(),
+                name: e.name.clone(),
+                folder: e.folder.clone(),
+                kind: match e.kind {
+                    Kind::Design => "design",
+                    Kind::Cad => "cad",
+                }
+                .into(),
+                format: e.format.clone(),
+                bytes: e.bytes,
+                part_number: e.part_number.clone(),
+                description: e.description.clone(),
+                revision: e.revision.clone(),
             }
-            .into(),
-            format: e.format.clone(),
-            bytes: e.bytes,
-            part_number: e.part_number.clone(),
-            description: e.description.clone(),
-            revision: e.revision.clone(),
-        })
-        .collect();
+        }));
+        matched += hits as u64;
+        total += library.entries.len() as u64;
+        truncated |= library.truncated;
+    }
+    parts.truncate(limit);
     let reply = PartsSearchReply {
-        folder: folder.to_string(),
+        folder: folders.first().cloned().unwrap_or_default(),
+        libraries: if named.is_some() { Vec::new() } else { folders.clone() },
         parts,
-        matched: matched as u64,
-        total: library.entries.len() as u64,
-        truncated: library.truncated,
+        matched,
+        total,
+        truncated,
     };
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
@@ -225,10 +250,41 @@ mod tests {
         let all = s.execute("library.parts.search", &json!({"folder": folder, "limit": 1})).unwrap();
         assert_eq!((all["parts"].as_array().unwrap().len(), all["matched"].as_u64()), (1, Some(2)), "the limit cuts the list, not the count");
         assert_eq!(s.doc.to_json(), before);
-        for bad in [json!({}), json!({"folder": ""}), json!({"folder": folder, "limit": 0}), json!({"folder": folder, "query": 3})] {
+        // No folder at all is the user's libraries (the test below).
+        for bad in [json!({"folder": ""}), json!({"folder": folder, "limit": 0}), json!({"folder": folder, "query": 3})] {
             assert!(s.execute("library.parts.search", &bad).is_err(), "{bad}");
         }
         assert!(s.execute("library.parts.search", &json!({"folder": dir.join("missing").to_str().unwrap()})).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Without a folder the search covers every library the app says the user set up (the
+    /// assistant's library_search), one unreadable library not hiding the others; with none set
+    /// up it says so.
+    #[test]
+    fn a_search_without_a_folder_covers_the_users_libraries() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-parts-libraries-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for f in ["Hardware/BOLTS/M3x8.step", "Bought/THRUSTERS/T200.step", "Bought/CAMERAS/Camera.igs"] {
+            let path = dir.join(f);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"x").unwrap();
+        }
+        let mut s = Session::default();
+        crate::project::set_libraries(Vec::new());
+        let e = s.execute("library.parts.search", &json!({})).unwrap_err().to_string();
+        assert!(e.contains("no parts library is set up"), "{e}");
+        crate::project::set_libraries(vec![dir.join("Hardware"), dir.join("Missing"), dir.join("Bought")]);
+        let all = s.execute("library.parts.search", &json!({})).unwrap();
+        assert_eq!((all["matched"].as_u64(), all["total"].as_u64()), (Some(3), Some(3)), "{all}");
+        assert_eq!(all["libraries"].as_array().map(Vec::len), Some(3), "{all}");
+        let one = s.execute("library.parts.search", &json!({"query": "t200"})).unwrap();
+        assert_eq!(one["matched"], 1, "{one}");
+        assert!(one["parts"][0]["file"].as_str().is_some_and(|f| f.ends_with("T200.step") && f.contains("Bought")), "{one}");
+        // A folder named is searched alone, as before.
+        let named = s.execute("library.parts.search", &json!({"folder": dir.join("Hardware").to_str().unwrap()})).unwrap();
+        assert!(named["total"] == 1 && named.get("libraries").is_none(), "{named}");
+        crate::project::set_libraries(Vec::new());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

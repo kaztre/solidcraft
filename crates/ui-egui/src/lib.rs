@@ -3140,6 +3140,15 @@ impl SolveApp {
         }
     }
 
+    /// The parts library folders the assistant may use: those set up in the Parts Library window,
+    /// while AI features and Preferences → AI let it.
+    pub(crate) fn assistant_libraries(&self) -> Vec<std::path::PathBuf> {
+        if !(self.preferences.ai_features && self.preferences.assistant_library) {
+            return Vec::new();
+        }
+        self.preferences.parts_libraries.iter().filter(|l| !l.folder.is_empty()).map(|l| std::path::PathBuf::from(&l.folder)).collect()
+    }
+
     pub fn open_path_async(&mut self, path: &str) {
         file_load::begin(self, path, false);
     }
@@ -3642,6 +3651,8 @@ impl SolveApp {
         // front's Versions folder, else its own folder.
         solidcraft_engine::project::set_allowed(self.preferences.ai_features && self.preferences.assistant_project);
         solidcraft_engine::project::set_folder(self.project_folder());
+        // The parts libraries the assistant may search and insert from.
+        solidcraft_engine::project::set_libraries(self.assistant_libraries());
         refused_part::next_frame(self, ctx);
         gpu::tick_tessellation(self);
         file_picker::tick(self, ctx);

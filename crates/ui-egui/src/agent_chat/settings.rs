@@ -541,6 +541,7 @@ fn connecting_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             ("ai.prefs.connect_apps", "ai.prefs.connect_apps_note", "connect_ai_apps", &mut app.preferences.connect_ai_apps),
             ("ai.prefs.internet", "ai.prefs.internet_note", "assistant_internet", &mut app.preferences.assistant_internet),
             ("ai.prefs.project", "ai.prefs.project_note", "assistant_project", &mut app.preferences.assistant_project),
+            ("ai.prefs.library", "ai.prefs.library_note", "assistant_library", &mut app.preferences.assistant_library),
             ("ai.prefs.background_commands", "ui.agent_off_thread_note", "agent_off_thread", &mut app.preferences.agent_off_thread),
             ("ai.prefs.connect_at_start", "ai.prefs.connect_at_start_note", "agent_connect_at_start", &mut app.preferences.agent_connect_at_start),
             ("ai.prefs.open_at_start", "ai.prefs.open_at_start_note", "agent_chat_open_at_start", &mut app.preferences.agent_chat_open_at_start),

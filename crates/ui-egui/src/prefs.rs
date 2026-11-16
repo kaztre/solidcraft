@@ -1705,6 +1705,9 @@ preference_settings! {
     /// its versions, else its own (`project.files`, `project.search`, `project.read`; an agent
     /// installed on this computer starts in it). Off: none of these, and agents start in
     /// SolidCraft's own working folder (docs/agent-chat.md, "The project folder").
+    /// The assistant may search the user's parts libraries and insert parts from them
+    /// (`solidcraft_engine::project::libraries`).
+    assistant_library: bool = true, PAGE_ASSISTANT;
     assistant_project: bool = true, PAGE_ASSISTANT;
     /// Add SolidCraft's MCP server to the AI apps installed on this computer at start-up
     /// ([`crate::ai_connect`]); off takes the entries out again.

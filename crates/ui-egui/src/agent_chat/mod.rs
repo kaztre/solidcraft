@@ -2256,6 +2256,7 @@ fn pump_tools(app: &mut SolveApp) {
     let Some(rx) = app.agent_chat.tools_rx.take() else { return };
     let configured = app.preferences.agent_chat_turn_limit;
     let limit = if configured == 0 { u32::MAX } else { configured.clamp(1, 1000) };
+    let libraries = app.assistant_libraries();
     for mut req in rx.try_iter().take(64) {
         let refuse = |req: ControlRequest, e: String| {
             let _ = req.reply.send(json!({"ok": false, "error": e}));
@@ -2281,6 +2282,13 @@ fn pump_tools(app: &mut SolveApp) {
                 allowed.push(started.to_string_lossy().into_owned());
             }
             o.insert("allow_paths".into(), json!(allowed));
+        }
+        // The user's parts libraries count as the chat's own folders, so a part found there is
+        // inserted without a question for each file (Preferences → AI turns this off).
+        if !libraries.is_empty()
+            && let Some(Value::Array(allowed)) = req.params.get_mut("allow_paths")
+        {
+            allowed.extend(libraries.iter().map(|l| json!(l.to_string_lossy())));
         }
         let undo_left = undo_len.saturating_sub(turn.start_undo);
         // The permission mode (the agent's own, else the global one) and "always allow" answers.

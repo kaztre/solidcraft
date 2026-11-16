@@ -31,6 +31,24 @@ pub fn allowed() -> bool {
     ALLOWED.load(Ordering::Relaxed)
 }
 
+static LIBRARIES: RwLock<Vec<PathBuf>> = RwLock::new(Vec::new());
+
+/// The parts libraries the assistant may search and insert parts from: the folders the user set
+/// up in the Parts Library window, while Preferences → AI lets the assistant use them (the app
+/// says which; none without it).
+pub fn set_libraries(folders: Vec<PathBuf>) {
+    if LIBRARIES.read().is_ok_and(|l| *l == folders) {
+        return;
+    }
+    if let Ok(mut l) = LIBRARIES.write() {
+        *l = folders;
+    }
+}
+
+pub fn libraries() -> Vec<PathBuf> {
+    LIBRARIES.read().map(|l| l.clone()).unwrap_or_default()
+}
+
 /// The project folder: the app's choice, else the folder `design` (a saved design's path) is in.
 pub fn folder(design: Option<&str>) -> Option<PathBuf> {
     FOLDER.read().ok().and_then(|f| f.clone()).or_else(|| folder_of(design?, &[]))

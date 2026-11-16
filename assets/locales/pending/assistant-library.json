@@ -1,0 +1,10 @@
+{
+  "en": { "ai.prefs.library": "Let the assistant use the parts library", "ai.prefs.library_note": "The assistant can search the folders set up in the Parts Library window and insert parts from them." },
+  "de": { "ai.prefs.library": "Dem Assistenten die Teilebibliothek erlauben", "ai.prefs.library_note": "Der Assistent kann die im Fenster Teilebibliothek eingerichteten Ordner durchsuchen und Teile daraus einfügen." },
+  "ja": { "ai.prefs.library": "アシスタントにパーツライブラリの使用を許可", "ai.prefs.library_note": "アシスタントは、パーツライブラリウィンドウで設定したフォルダを検索し、そこからパーツを挿入できます。" },
+  "zh": { "ai.prefs.library": "允许助手使用零件库", "ai.prefs.library_note": "助手可以搜索在零件库窗口中设置的文件夹，并从中插入零件。" },
+  "ko": { "ai.prefs.library": "어시스턴트가 부품 라이브러리를 사용하도록 허용", "ai.prefs.library_note": "어시스턴트가 부품 라이브러리 창에서 설정한 폴더를 검색하고 그 안의 부품을 삽입할 수 있습니다." },
+  "ar": { "ai.prefs.library": "السماح للمساعد باستخدام مكتبة القطع", "ai.prefs.library_note": "يمكن للمساعد البحث في المجلدات المعدّة في نافذة مكتبة القطع وإدراج قطع منها." },
+  "he": { "ai.prefs.library": "לאפשר לעוזר להשתמש בספריית החלקים", "ai.prefs.library_note": "העוזר יכול לחפש בתיקיות שהוגדרו בחלון ספריית החלקים ולהוסיף מהן חלקים." },
+  "vi": { "ai.prefs.library": "Cho phép trợ lý dùng thư viện chi tiết", "ai.prefs.library_note": "Trợ lý có thể tìm trong các thư mục đã thiết lập ở cửa sổ Thư viện chi tiết và chèn chi tiết từ đó." }
+}

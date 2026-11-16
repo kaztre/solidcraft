@@ -447,6 +447,24 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             Effect::ReadOnly,
         ),
         tool(
+            "library_search",
+            "Search the parts library",
+            "Find parts in the user's parts libraries (the folders set up in the Parts Library window: standard hardware, bought parts, \
+             the user's own): each part's name, category folders, part number, description and `file`. Look here before modelling a \
+             part that may already exist (a connector, a bearing, a thruster, a fastener the user stocks). Insert a `design` part with \
+             the component.insert_design command, {\"path\": file}: it comes in as a linked component to place or joint. A `cad` part \
+             (STEP, IGES) is made a library part first with library.parts.convert {\"path\": file}, whose reply names the design to insert.",
+            object(
+                json!({
+                    "query": string("Words that must all appear in a part's name, folders, part number or description (default: every part)"),
+                    "folder": string("One library folder (default: every library the user set up)"),
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 5000, "description": "Most parts (default 200)"},
+                }),
+                &[],
+            ),
+            Effect::ReadOnly,
+        ),
+        tool(
             "project_search",
             "Search the project",
             "Look for text in the project folder's file names and in its text and KiCad files (a part number, a reference such as \
@@ -1059,6 +1077,7 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         "new_design" => exec(b, "file.new", pick(a, &["name"])),
         "open" => exec(b, "doc.open", pick(a, &["path", "up", "names"])),
         "web_fetch" => exec(b, "web.fetch", pick(a, &["url", "max_chars"])),
+        "library_search" => exec(b, "library.parts.search", pick(a, &["query", "folder", "limit"])),
         "project_files" => exec(b, "project.files", pick(a, &["path", "filter", "limit"])),
         "project_search" => exec(b, "project.search", pick(a, &["query", "path", "limit"])),
         "project_read" => exec(b, "project.read", pick(a, &["path", "offset", "max_chars", "raw"])),
@@ -1268,6 +1287,7 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
         "open" => mapped("doc.open", pick(a, &["path", "up", "names"])),
         "new_design" => mapped("file.new", pick(a, &["name"])),
         "web_fetch" => mapped("web.fetch", pick(a, &["url", "max_chars"])),
+        "library_search" => mapped("library.parts.search", pick(a, &["query", "folder", "limit"])),
         "project_files" => mapped("project.files", pick(a, &["path", "filter", "limit"])),
         "project_search" => mapped("project.search", pick(a, &["query", "path", "limit"])),
         "project_read" => mapped("project.read", pick(a, &["path", "offset", "max_chars", "raw"])),
@@ -1302,6 +1322,7 @@ const TOOL_STEPS: &[&str] = &[
     "execute",
     "export",
     "inspect_design",
+    "library_search",
     "list_commands",
     "measure",
     "new_design",
