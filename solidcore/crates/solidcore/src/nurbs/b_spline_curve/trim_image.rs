@@ -38,7 +38,7 @@
 //! **Pieces.** `[lo, hi]` is cut at the trim's knots. A piece whose points can lie on more
 //! than [`MAX_PATCHES`] polynomial pieces of the surface, whose rounded (u, v) range runs off
 //! the surface's knots, or that does not clear, is halved,
-//! breadth first. Every point of a piece lies on one of the surface pieces its parameter
+//! depth first. Every point of a piece lies on one of the surface pieces its parameter
 //! range meets, and each of those pieces' polynomials is the surface at the points on it, so
 //! the piece clears only where it clears on every one of them.
 //!
@@ -161,6 +161,10 @@ pub(crate) fn radius_clears_on_surface(
         .map(|(&a, &b)| (a, b, 0))
         .collect();
     let mut enclosed = 0usize;
+    // Depth first, the earliest piece first: a trim that truly turns too sharply is found
+    // after [`MAX_HALVINGS`] halvings of the piece holding the turn, where breadth first
+    // spent the whole budget of [`MAX_PIECES`] enclosures on every such trim before giving
+    // the same answer. A trim that clears encloses the same pieces either way.
     while let Some((a, b, halvings)) = pieces.pop_front() {
         k.check_cancelled(OP)?;
         enclosed += 1;
@@ -177,8 +181,8 @@ pub(crate) fn radius_clears_on_surface(
         if halvings >= MAX_HALVINGS || !splits {
             return Ok(false);
         }
-        pieces.push_back((a, m, halvings + 1));
-        pieces.push_back((m, b, halvings + 1));
+        pieces.push_front((m, b, halvings + 1));
+        pieces.push_front((a, m, halvings + 1));
     }
     Ok(true)
 }
