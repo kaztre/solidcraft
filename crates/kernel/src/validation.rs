@@ -197,6 +197,12 @@ pub fn check_kept_counted(body: &Body) -> std::result::Result<(), KeptRefusal> {
     if body.is_mesh() {
         return Ok(());
     }
+    // A body checked before is not checked again: the check of a heavy imported body takes a
+    // minute, and a feature on a body that already fails it asked for it up to three times a
+    // step (the body before, its result beside the features after, its result again in line).
+    if let Some(known) = known::get(body) {
+        return known;
+    }
     let step = body.unchecked.as_deref().and_then(|u| u.take(&body.record).map(|r| (u, r)));
     let (what, check) = match step {
         Some((u, r)) => (u.what.as_str(), check_result_owned(r, u.how)),
@@ -205,7 +211,68 @@ pub fn check_kept_counted(body: &Body) -> std::result::Result<(), KeptRefusal> {
             Err(error) => return Err(KeptRefusal { failures: None, error }),
         },
     };
-    verdict_counted(what, check)
+    let verdict = verdict_counted(what, check);
+    known::put(body, &verdict);
+    verdict
+}
+
+/// Whether [`check_kept_counted`] already refused `body` (nothing is checked here): a feature
+/// about to change such a body checks its result in line, where the result may be kept, not
+/// beside the features after it, where a refusal means doing the feature again.
+pub fn known_refused(body: &Body) -> bool {
+    matches!(known::get(body), Some(Err(_)))
+}
+
+/// The verdicts [`check_kept_counted`] has reached, by the body's record (bodies share a record
+/// when one is a copy of the other): kept only while the record lives.
+mod known {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, Weak};
+
+    use solidcore_record::brep::Brep;
+
+    use super::KeptRefusal;
+    use crate::KernelError;
+    use crate::body::Body;
+
+    /// A verdict as it is kept: passed, or the failed tests and the refusal's text.
+    type Kept = std::result::Result<(), (Option<usize>, String)>;
+
+    static KNOWN: Mutex<Option<HashMap<usize, (Weak<Brep>, Kept)>>> = Mutex::new(None);
+    /// Verdicts kept at most; past it the ones whose bodies are gone are dropped.
+    const MOST: usize = 4096;
+
+    pub(super) fn get(body: &Body) -> Option<std::result::Result<(), KeptRefusal>> {
+        let known = KNOWN.lock().ok()?;
+        let (record, kept) = known.as_ref()?.get(&(Arc::as_ptr(&body.record) as usize))?;
+        // The address is the record's only while that record lives.
+        if !record.upgrade().is_some_and(|r| Arc::ptr_eq(&r, &body.record)) {
+            return None;
+        }
+        Some(match kept {
+            Ok(()) => Ok(()),
+            Err((failures, text)) => Err(KeptRefusal { failures: *failures, error: KernelError::Failed(text.clone()) }),
+        })
+    }
+
+    pub(super) fn put(body: &Body, verdict: &std::result::Result<(), KeptRefusal>) {
+        // Only a verdict the check reached: one it could not run for (stopped, out of memory) is
+        // asked for again.
+        let kept: Kept = match verdict {
+            Ok(()) => Ok(()),
+            Err(KeptRefusal { failures: Some(n), error: KernelError::Failed(text) }) => Err((Some(*n), text.clone())),
+            Err(_) => return,
+        };
+        let Ok(mut known) = KNOWN.lock() else { return };
+        let known = known.get_or_insert_with(HashMap::new);
+        if known.len() >= MOST {
+            known.retain(|_, (record, _)| record.strong_count() > 0);
+            if known.len() >= MOST {
+                known.clear();
+            }
+        }
+        known.insert(Arc::as_ptr(&body.record) as usize, (Arc::downgrade(&body.record), kept));
+    }
 }
 
 /// What [`check_kept`] makes of SMLib's check of what it read (`what` names the step).

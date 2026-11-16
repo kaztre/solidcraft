@@ -2043,6 +2043,18 @@ fn run_kept(checks: Vec<(String, kernel::KeptCheck)>) -> kernel::Result<()> {
     Ok(())
 }
 
+/// Whether a feature changed a body the check is already known to refuse (`after`'s bodies not
+/// in `before`, by the body of that name there): its result is checked in line, where it may be
+/// kept ([`check_kept`]), not beside the features after it, where a refusal costs the feature
+/// and a second check. Nothing is checked here.
+fn changes_a_refused_body(before: &ModelState, after: &ModelState) -> bool {
+    after
+        .bodies
+        .iter()
+        .filter(|b| !before.bodies.iter().any(|old| old.body.same_shape(&b.body)))
+        .any(|b| before.bodies.iter().find(|old| old.name == b.name).is_some_and(|old| kernel::known_refused(&old.body)))
+}
+
 /// Whether `after`, a state feature `f` evaluated to from `before` in an earlier evaluation, is
 /// still its result in `doc`: a feature saved before format 14 names the pieces it splits a body
 /// into as the later features pick them ([`crate::lineage::order_legacy_lumps`]), which neither
@@ -3603,7 +3615,9 @@ impl Model {
                         // The checks the feature's steps left to its end: the bodies it keeps.
                         if !deferred {
                             Ok(())
-                        } else if let Some(detached) = checks.detach(&state, &next).filter(|_| refused.is_none()) {
+                        } else if let Some(detached) =
+                            checks.detach(&state, &next).filter(|_| refused.is_none() && !changes_a_refused_body(&state, &next))
+                        {
                             apart = Some(detached);
                             Ok(())
                         } else {
