@@ -188,7 +188,9 @@ impl Product {
                 ("references", "render.stage_panels.surfaces_references", "library"),
             ],
             Self::RenderInspector => vec![("remove", "render.inspector_remove", "delete")],
-            Self::Browser | Self::RenderShots | Self::SketchOptions | Self::Bom => Vec::new(),
+            // The switch between the Browser and the Versions tab (fork, docs/versions.md).
+            Self::Browser => vec![("versions", "ui.versions_show", "restore")],
+            Self::RenderShots | Self::SketchOptions | Self::Bom => Vec::new(),
         };
         entries.into_iter().map(|(id, key, icon)| HeaderActionSpec { id: ControlId(id.into()), label_key: key.into(), icon: icon.into() }).collect()
     }
@@ -275,6 +277,21 @@ impl Product {
                     })
                     .into_iter()
                     .collect()
+            }
+            // The Versions tab takes the Browser's place while its switch is on: the header says
+            // which of the two is showing and switches back.
+            Self::Browser if app.preferences.versions_tab && cfg!(not(target_arch = "wasm32")) => {
+                let open = app.versions.open;
+                if open {
+                    presentation.title = solidcraft_ui_text::tr("ui.versions_tab").into();
+                }
+                vec![RuntimeAction {
+                    id: ControlId("versions".into()),
+                    label: solidcraft_ui_text::tr(if open { "ui.versions_show_browser" } else { "ui.versions_show" }).into(),
+                    enabled: true,
+                    disabled_reason: None,
+                    pressed: Some(open),
+                }]
             }
             Self::Browser | Self::RenderShots | Self::SketchOptions | Self::Bom => Vec::new(),
         };
@@ -537,7 +554,13 @@ pub(crate) fn drain_production_actions(app: &mut crate::SolveApp) -> PanelResult
                 crate::render_workspace::library::set_library_mode(app, mode);
             }
             Product::RenderInspector => crate::render_workspace::inspector_panel::shared_remove(app),
-            Product::Browser | Product::RenderShots | Product::SketchOptions | Product::Bom => {}
+            Product::Browser => {
+                if action.action.0 == "versions" {
+                    app.versions.open = !app.versions.open;
+                    app.versions.soon();
+                }
+            }
+            Product::RenderShots | Product::SketchOptions | Product::Bom => {}
         }
     }
     Ok(())

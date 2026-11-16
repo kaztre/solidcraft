@@ -387,6 +387,9 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let v = view(app);
     poll(app, ui.ctx(), v.folder.as_deref());
+    // The panel is as tall as what the tab holds (the Browser's rows say theirs the same way),
+    // not as tall as the Browser's rows were.
+    let top = ui.cursor().top();
     ui.add_space(t.space_3);
     let part_label = tr(if v.assembly { "ui.versions_scope_assembly" } else { "ui.versions_scope_part" });
     let mut scope = usize::from(app.versions.scope == Scope::Folder);
@@ -398,11 +401,13 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui.add_space(t.space_3);
     let Some(folder) = v.folder.clone() else {
         not_kept(app, ui);
+        crate::panel_runtime::report_content_extent(ui, top, ui.cursor().top() - top, true);
         return;
     };
-    egui::ScrollArea::vertical().id_salt("sc_versions_scroll").auto_shrink([false, true]).show(ui, |ui| {
+    let scrolled = egui::ScrollArea::vertical().id_salt("sc_versions_scroll").auto_shrink([false, true]).show(ui, |ui| {
         contents(app, ui, &v, &folder);
     });
+    crate::panel_runtime::report_content_extent(ui, top, scrolled.inner_rect.top() - top + scrolled.content_size.y + t.space_6, true);
 }
 
 /// The design in front isn't in a folder that keeps versions.
@@ -632,7 +637,7 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui, v: &View, folder: &str) {
                     if !last {
                         let x = under.left() + GRAPH_GUTTER / 2.0;
                         ui.painter()
-                            .line_segment([egui::pos2(x, under.top()), egui::pos2(x, under.bottom())], egui::Stroke::new(GRAPH_RAIL, t.accent));
+                            .line_segment([egui::pos2(x, under.top()), egui::pos2(x, under.bottom())], egui::Stroke::new(GRAPH_LINE, t.accent));
                     }
                 }
             }
@@ -645,7 +650,7 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui, v: &View, folder: &str) {
 
 /// Width of the history graph's rail column, and the rail's thickness.
 const GRAPH_GUTTER: f32 = 22.0;
-const GRAPH_RAIL: f32 = 2.0;
+const GRAPH_LINE: f32 = 2.0;
 
 /// One row of the history graph.
 #[derive(Default)]
@@ -665,7 +670,7 @@ struct GraphRow<'a> {
 /// A row of the history graph: its node on the rail (`rail`: whether the rail runs on above and
 /// below it), the version's first line with its revision and name chips, and who checked it in
 /// and when underneath. `key` makes it a row to pick; the changes row has none.
-fn graph_row(ui: &mut egui::Ui, key: Option<&str>, row: &GraphRow, rail: (bool, bool)) -> egui::Response {
+fn graph_row(ui: &mut egui::Ui, key: Option<&str>, row: &GraphRow, joins: (bool, bool)) -> egui::Response {
     let t = Tokens::get();
     let two_lines = !row.by.is_empty();
     let height = if two_lines { t.font_small + t.font_caption + t.space_12 + t.space_4 } else { t.font_small + t.space_12 };
@@ -687,12 +692,12 @@ fn graph_row(ui: &mut egui::Ui, key: Option<&str>, row: &GraphRow, rail: (bool, 
     // The rail and the node.
     let first_line = rect.top() + t.space_6 + t.font_small / 2.0;
     let node = egui::pos2(rect.left() + GRAPH_GUTTER / 2.0, first_line);
-    let rail_color = if row.pending { t.text_dim } else { t.accent };
-    if rail.0 {
-        painter.line_segment([egui::pos2(node.x, rect.top() - 1.0), node], egui::Stroke::new(GRAPH_RAIL, t.accent));
+    let line_color = if row.pending { t.text_dim } else { t.accent };
+    if joins.0 {
+        painter.line_segment([egui::pos2(node.x, rect.top() - 1.0), node], egui::Stroke::new(GRAPH_LINE, t.accent));
     }
-    if rail.1 {
-        painter.line_segment([node, egui::pos2(node.x, rect.bottom() + 1.0)], egui::Stroke::new(GRAPH_RAIL, rail_color));
+    if joins.1 {
+        painter.line_segment([node, egui::pos2(node.x, rect.bottom() + 1.0)], egui::Stroke::new(GRAPH_LINE, line_color));
     }
     let released = !row.revisions.is_empty();
     let color = if released { t.form_success } else { t.accent };
@@ -884,22 +889,6 @@ fn yes_no(app: &mut SolveApp, ui: &mut egui::Ui, action: &str, enabled: bool) ->
         app.versions.confirm = None;
     }
     yes
-}
-
-/// The Browser panel header's switch between the Browser and the Versions tab, a small button
-/// ending at `right`; returns where the header's next item ends.
-pub fn header_switch(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, right: f32) -> f32 {
-    let t = Tokens::get();
-    let size = t.control_height.min(rect.height());
-    let r = egui::Rect::from_center_size(egui::pos2(right - size / 2.0, rect.center().y), egui::vec2(size, size));
-    let label = tr(if app.versions.open { "ui.versions_show_browser" } else { "ui.versions_show" });
-    let response = ui_kit::quiet_icon_button_at(ui, r, "restore", label);
-    crate::scenario::publish_target("browser:versions", r);
-    if response.on_hover_text(label).clicked() {
-        app.versions.open = !app.versions.open;
-        app.versions.soon();
-    }
-    r.left() - t.space_4
 }
 
 #[cfg(test)]

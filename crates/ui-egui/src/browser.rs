@@ -1426,10 +1426,8 @@ pub(crate) fn panel_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui.ctx().data_mut(|data| data.insert_temp(egui::Id::unique("sc_compact_tree"), true));
     }
     if !crate::render_workspace::browser_mode(app, ui) {
-        // The Versions tab takes the Browser's place while its switch is on (fork).
-        if app.preferences.versions_tab {
-            versions_switch(app, ui);
-        }
+        // The Versions tab takes the Browser's place while its switch in the panel's header
+        // is on (fork; `panel_runtime::production`).
         if app.preferences.versions_tab && app.versions.open {
             crate::versions::panel(app, ui);
         } else {
@@ -1440,20 +1438,6 @@ pub(crate) fn panel_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
     if render {
         ui.ctx().data_mut(|data| data.remove::<bool>(egui::Id::unique("sc_compact_tree")));
     }
-}
-
-/// The row above the Browser's contents that holds the switch between the Browser and the
-/// Versions tab, with the tab's name while it is open. The panel host draws the header itself,
-/// so the switch stands at the top of the contents.
-fn versions_switch(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let t = Tokens::get();
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.control_height), Sense::hover());
-    if app.versions.open {
-        let title = solidcraft_ui_text::tr("ui.versions_tab").to_string();
-        let galley = ui.painter().layout_no_wrap(title, crate::ui_kit::type_face::semibold(t.font_heading), t.text);
-        ui.painter().galley(pos2(rect.left() + t.space_6, rect.center().y - galley.size().y / 2.0), galley, t.text);
-    }
-    crate::versions::header_switch(app, ui, rect, rect.right() - t.space_6);
 }
 
 fn prepare_model(app: &mut SolveApp) {

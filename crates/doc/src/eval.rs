@@ -3586,16 +3586,6 @@ impl Model {
                 let mut r = match frame_error.or(bad_param) {
                     _ if cached.is_some() => Ok(()),
                     Some(e) => Err(kernel::KernelError::Failed(e)),
-                    None if refused.is_some() => {
-                        let refused = refused.clone().map(|x| (x.error, x.warning, x.import_report, x.repair));
-                        match refused {
-                            Some((e, w, ir, rp)) => {
-                                (warning, import_report, repair) = (w, ir, rp);
-                                Err(e)
-                            }
-                            None => Ok(()),
-                        }
-                    }
                     None => kernel::guard(&f.name, || {
                         let _val_guard = EvalValidationGuard(EVAL_VALIDATION.replace(validation));
                         let (r, deferred) =
@@ -3613,7 +3603,7 @@ impl Model {
                         // The checks the feature's steps left to its end: the bodies it keeps.
                         if !deferred {
                             Ok(())
-                        } else if let Some(detached) = checks.detach(&state, &next) {
+                        } else if let Some(detached) = checks.detach(&state, &next).filter(|_| refused.is_none()) {
                             apart = Some(detached);
                             Ok(())
                         } else {
@@ -3621,6 +3611,16 @@ impl Model {
                         }
                     }),
                 };
+                // A feature whose check, running beside the features after it, refused its bodies
+                // is evaluated again here with the check in line, which keeps a body that was
+                // refused before the feature and is no worse after it (kaztre#15). Refused again,
+                // it ends as that check ended it.
+                if r.is_err()
+                    && let Some(x) = &refused
+                {
+                    (warning, import_report, repair) = (x.warning.clone(), x.import_report.clone(), x.repair.clone());
+                    r = Err(x.error.clone());
+                }
                 if r.is_ok()
                     && let Some(after) = apart.take()
                 {
