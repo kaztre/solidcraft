@@ -626,6 +626,10 @@ fn with_largest_fit(
         return kernel::KernelError::TooLarge(why);
     }
     match search() {
+        // Out of time: the size found builds, and a larger one may too.
+        Ok(kernel::FitSearch { found: Some((fits, _)), stopped: true, .. }) => {
+            kernel::KernelError::TooLarge(format!("{}; a {size} of {} mm fits, and a larger one may", kernel::without_fit_note(&why), show_mm(fits)))
+        }
         Ok(kernel::FitSearch { found: Some((largest, _)), .. }) if kernel::names_largest_fit(&why) => {
             kernel::KernelError::TooLarge(kernel::with_fit_note(&why, size, largest))
         }
@@ -4092,6 +4096,7 @@ mod largest_fit_tests {
                 found: None,
                 smallest_refused: Some((0.001, kernel::KernelError::TooLarge("the trim leaks; the largest radius that fits is 0.0004 mm".into()))),
                 tried: 14,
+                stopped: false,
             })
         })
         .to_string();
