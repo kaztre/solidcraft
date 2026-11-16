@@ -181,7 +181,10 @@ pub fn scan(root: &str) -> Result<Library> {
                 library.truncated = true;
                 break;
             }
-            if entry.kind == Kind::Design
+            // A design kept only in the cloud is listed by its name alone: reading its properties
+            // would download it, and a library with a thousand such parts took over ten minutes
+            // to list, showing no parts meanwhile.
+            if reads_properties(&entry)
                 && let Some(metadata) = design_properties(&dir.join(Path::new(&entry.path).file_name().unwrap_or_default()))
             {
                 entry.part_number = text(&metadata, "part_number");
@@ -223,6 +226,12 @@ fn name_after_folder(entry: &mut Entry) {
     }
     entry.name = name;
     entry.folder = folder;
+}
+
+/// Whether a scan opens the part's file for its properties: a design whose contents are on this
+/// computer.
+fn reads_properties(entry: &Entry) -> bool {
+    entry.kind == Kind::Design && entry.local
 }
 
 /// A design file's properties, or `None` when it can't be read as a design.
@@ -309,6 +318,28 @@ pub fn search<'a>(library: &'a Library, query: &str, limit: usize) -> (Vec<&'a E
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    /// A design kept only in the cloud is not opened for its properties: listing a library must
+    /// not download it.
+    #[test]
+    fn a_design_kept_only_in_the_cloud_is_not_opened_by_a_scan() {
+        let entry = |kind: Kind, local: bool| Entry {
+            path: "a".into(),
+            name: "a".into(),
+            folder: String::new(),
+            kind,
+            format: String::new(),
+            bytes: 0,
+            part_number: None,
+            description: None,
+            revision: None,
+            local,
+            source: None,
+        };
+        assert!(reads_properties(&entry(Kind::Design, true)));
+        assert!(!reads_properties(&entry(Kind::Design, false)));
+        assert!(!reads_properties(&entry(Kind::Cad, true)));
+    }
 
     /// A folder removed when the test ends.
     struct Dir(PathBuf);
