@@ -521,4 +521,15 @@ fn the_display_menu_switches_the_orbit_style() {
         h.call("ui.click", json!({"x": row.x, "y": row.y}));
         assert_eq!(h.app.preferences.free_orbit, free, "{handle}");
     }
+    // And what the orbit turns around: the view's centre, the point under the cursor, the origin.
+    use crate::prefs::OrbitAround;
+    for (handle, around) in [
+        ("view:orbit_around_cursor", OrbitAround::Cursor),
+        ("view:orbit_around_origin", OrbitAround::Origin),
+        ("view:orbit_around_centre", OrbitAround::ViewCentre),
+    ] {
+        let row = crate::scenario::handle_at(handle).unwrap();
+        h.call("ui.click", json!({"x": row.x, "y": row.y}));
+        assert_eq!(h.app.preferences.orbit_around, around, "{handle}");
+    }
 }

@@ -64,6 +64,38 @@ pub(super) struct Checks {
     held: Vec<(usize, CacheEntry)>,
     /// Features whose check refused their bodies, to fail again as it did.
     refused: HashMap<usize, Failure>,
+    /// What the checks running now have to say of bodies they kept ([`Notes`]).
+    notes: Notes,
+}
+
+/// Warnings of checks that kept a body the check refuses (one that came refused and is no
+/// worse, kaztre#15), by feature index and id: a check ends after its feature's result was
+/// made, so its warning is added to that result, and to its cache entry, once it is known.
+#[derive(Clone, Default)]
+pub(super) struct Notes(Arc<Mutex<Vec<(usize, u64, String)>>>);
+
+impl Notes {
+    pub fn push(&self, index: usize, id: u64, note: String) {
+        if let Ok(mut notes) = self.0.lock() {
+            notes.push((index, id, note));
+        }
+    }
+
+    fn of(&self, index: usize) -> Vec<String> {
+        self.0.lock().map(|n| n.iter().filter(|(i, ..)| *i == index).map(|(.., note)| note.clone()).collect()).unwrap_or_default()
+    }
+
+    /// Every warning so far, by feature id, taken.
+    fn take(&self) -> Vec<(u64, String)> {
+        self.0.lock().map(|mut n| n.drain(..).map(|(_, id, note)| (id, note)).collect()).unwrap_or_default()
+    }
+}
+
+/// `note` added to `warning`, once.
+fn noted(warning: &mut Option<String>, note: &str) {
+    if !warning.as_deref().is_some_and(|w| w.contains(note)) {
+        super::append_warning(warning, note.to_string());
+    }
 }
 
 impl Checks {
@@ -75,7 +107,33 @@ impl Checks {
             running: VecDeque::new(),
             held: Vec::new(),
             refused: HashMap::new(),
+            notes: Notes::default(),
         }
+    }
+
+    /// Where feature checks started now leave their warnings.
+    pub fn notes(&self) -> Notes {
+        self.notes.clone()
+    }
+
+    /// Adds the warnings of the checks that ended to the results of their features.
+    pub fn note(&self, out: &mut [FeatureResult]) {
+        for (id, note) in self.notes.take() {
+            if let Some(r) = out.iter_mut().find(|r| r.id == id) {
+                noted(&mut r.warning, &note);
+            }
+        }
+    }
+
+    /// Stores `entry`, feature `index`'s, with the warnings of its check.
+    fn put(&self, index: usize, mut entry: CacheEntry, cache: &Mutex<EvalCache>, kept: &KeptSlot) {
+        for note in self.notes.of(index) {
+            noted(&mut entry.whole.warning, &note);
+            if let Some((_, change)) = &mut entry.change {
+                noted(&mut change.warning, &note);
+            }
+        }
+        entry.put(cache, kept);
     }
 
     /// The check of the bodies `after` adds to `before`, detached from them so it can run beside
@@ -86,7 +144,10 @@ impl Checks {
                 .bodies
                 .iter()
                 .filter(|b| !before.bodies.iter().any(|old| old.body.same_shape(&b.body)))
-                .map(|b| (b.name.clone(), kernel::detach_kept(&b.body)))
+                .map(|b| {
+                    let from = before.bodies.iter().find(|old| old.name == b.name).map(|old| &old.body);
+                    (b.name.clone(), kernel::detach_kept_from(&b.body, from))
+                })
                 .collect()
         })
     }
@@ -134,7 +195,7 @@ impl Checks {
         if self.running.front().is_some_and(|r| r.index <= index) {
             self.held.push((index, entry));
         } else {
-            entry.put(cache, kept);
+            self.put(index, entry, cache, kept);
         }
     }
 
@@ -156,12 +217,15 @@ impl Checks {
                 // The checks still running are left to end on their own.
                 self.running.clear();
                 self.held.retain(|(i, _)| *i < r.index);
+                // Nor do their warnings: the checks left running write to notes nobody reads.
+                let stands = self.notes.0.lock().map(|n| n.iter().filter(|(i, ..)| *i < r.index).cloned().collect()).unwrap_or_default();
+                self.notes = Notes(Arc::new(Mutex::new(stands)));
                 return Some(Refused { index: r.index, saved: r.saved, failure: Failure { error, ..r.failure } });
             }
             let upto = self.running.front().map_or(usize::MAX, |next| next.index);
             for (i, entry) in std::mem::take(&mut self.held) {
                 if i < upto {
-                    entry.put(cache, kept);
+                    self.put(i, entry, cache, kept);
                 } else {
                     self.held.push((i, entry));
                 }
@@ -216,7 +280,7 @@ mod tests {
     }
 
     fn checks() -> Checks {
-        Checks { on: true, most: 4, running: VecDeque::new(), held: Vec::new(), refused: HashMap::new() }
+        Checks { on: true, most: 4, running: VecDeque::new(), held: Vec::new(), refused: HashMap::new(), notes: Notes::default() }
     }
 
     /// A check that ends after the evaluation went on, with `r`.

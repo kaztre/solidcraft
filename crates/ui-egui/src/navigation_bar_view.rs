@@ -336,6 +336,13 @@ fn style_menu(app: &SolveApp) -> Menu {
     Menu { entries, close_on_pick: true }
 }
 
+/// The Display menu's "Orbit around" rows: the choice, the row's id and its label.
+const ORBIT_AROUND: [(crate::prefs::OrbitAround, &str, &str); 3] = [
+    (crate::prefs::OrbitAround::ViewCentre, "orbit_around_centre", "ui.view_centre"),
+    (crate::prefs::OrbitAround::Cursor, "orbit_around_cursor", "prefs.under_cursor"),
+    (crate::prefs::OrbitAround::Origin, "orbit_around_origin", "ui.origin"),
+];
+
 /// The View menu: graphics preset, what the view shows, projection, cursor and the assistant.
 fn display_menu(app: &SolveApp) -> Menu {
     let row = |id: &str, label: &str, icon: &str, target: &str, selected: bool| {
@@ -392,6 +399,11 @@ fn display_menu(app: &SolveApp) -> Menu {
         item.tip = Some(app.tr("nav.free_orbit.snap_help").to_owned());
         entries.push(MenuEntry::Row(item));
     }
+    // What an orbit turns around, here as well as in Preferences ▸ Navigation.
+    entries.push(MenuEntry::Heading(app.tr("ui.orbit_around").to_owned()));
+    for (around, id, key) in ORBIT_AROUND {
+        entries.push(MenuEntry::Row(row(id, app.tr(key), "orbit", &format!("view:{id}"), app.preferences.orbit_around == around)));
+    }
     entries.push(MenuEntry::Separator);
     for (id, label, on) in [
         ("auto_ortho_faces", "Perspective while orbiting, ortho on faces", app.ui.auto_ortho_faces),
@@ -422,6 +434,11 @@ fn display_pick(app: &mut SolveApp, item: &str) {
             }
         }
         "orbit_turntable" | "orbit_free" => app.preferences.free_orbit = item == "orbit_free",
+        "orbit_around_centre" | "orbit_around_cursor" | "orbit_around_origin" => {
+            if let Some((around, ..)) = ORBIT_AROUND.into_iter().find(|(_, id, _)| *id == item) {
+                app.preferences.orbit_around = around;
+            }
+        }
         "auto_ortho_faces" => app.ui.auto_ortho_faces = !app.ui.auto_ortho_faces,
         "tool_cursor" => app.ui.tool_cursor = !app.ui.tool_cursor,
         "view_angles" => {

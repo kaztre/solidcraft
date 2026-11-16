@@ -200,7 +200,7 @@ pub fn check_kept_counted(body: &Body) -> std::result::Result<(), KeptRefusal> {
     // A body checked before is not checked again: the check of a heavy imported body takes a
     // minute, and a feature on a body that already fails it asked for it up to three times a
     // step (the body before, its result beside the features after, its result again in line).
-    if let Some(known) = known::get(body) {
+    if let Some(known) = known::get(&body.record) {
         return known;
     }
     let step = body.unchecked.as_deref().and_then(|u| u.take(&body.record).map(|r| (u, r)));
@@ -212,7 +212,7 @@ pub fn check_kept_counted(body: &Body) -> std::result::Result<(), KeptRefusal> {
         },
     };
     let verdict = verdict_counted(what, check);
-    known::put(body, &verdict);
+    known::put(&body.record, &verdict);
     verdict
 }
 
@@ -220,7 +220,7 @@ pub fn check_kept_counted(body: &Body) -> std::result::Result<(), KeptRefusal> {
 /// about to change such a body checks its result in line, where the result may be kept, not
 /// beside the features after it, where a refusal means doing the feature again.
 pub fn known_refused(body: &Body) -> bool {
-    matches!(known::get(body), Some(Err(_)))
+    matches!(known::get(&body.record), Some(Err(_)))
 }
 
 /// The verdicts [`check_kept_counted`] has reached, by the body's record (bodies share a record
@@ -233,7 +233,6 @@ mod known {
 
     use super::KeptRefusal;
     use crate::KernelError;
-    use crate::body::Body;
 
     /// A verdict as it is kept: passed, or the failed tests and the refusal's text.
     type Kept = std::result::Result<(), (Option<usize>, String)>;
@@ -242,11 +241,11 @@ mod known {
     /// Verdicts kept at most; past it the ones whose bodies are gone are dropped.
     const MOST: usize = 4096;
 
-    pub(super) fn get(body: &Body) -> Option<std::result::Result<(), KeptRefusal>> {
+    pub(super) fn get(of: &Arc<Brep>) -> Option<std::result::Result<(), KeptRefusal>> {
         let known = KNOWN.lock().ok()?;
-        let (record, kept) = known.as_ref()?.get(&(Arc::as_ptr(&body.record) as usize))?;
+        let (record, kept) = known.as_ref()?.get(&(Arc::as_ptr(of) as usize))?;
         // The address is the record's only while that record lives.
-        if !record.upgrade().is_some_and(|r| Arc::ptr_eq(&r, &body.record)) {
+        if !record.upgrade().is_some_and(|r| Arc::ptr_eq(&r, of)) {
             return None;
         }
         Some(match kept {
@@ -255,7 +254,7 @@ mod known {
         })
     }
 
-    pub(super) fn put(body: &Body, verdict: &std::result::Result<(), KeptRefusal>) {
+    pub(super) fn put(of: &Arc<Brep>, verdict: &std::result::Result<(), KeptRefusal>) {
         // Only a verdict the check reached: one it could not run for (stopped, out of memory) is
         // asked for again.
         let kept: Kept = match verdict {
@@ -271,16 +270,12 @@ mod known {
                 known.clear();
             }
         }
-        known.insert(Arc::as_ptr(&body.record) as usize, (Arc::downgrade(&body.record), kept));
+        known.insert(Arc::as_ptr(of) as usize, (Arc::downgrade(of), kept));
     }
 }
 
-/// What [`check_kept`] makes of SMLib's check of what it read (`what` names the step).
-fn verdict(what: &str, check: std::result::Result<solidcraft_smlib::CheckReport, String>) -> Result<()> {
-    verdict_counted(what, check).map_err(|r| r.error)
-}
-
-/// [`verdict`], with how many tests a refused result fails ([`check_kept_counted`]).
+/// What [`check_kept_counted`] makes of SMLib's check of what it read (`what` names the step),
+/// with how many tests a refused result fails.
 fn verdict_counted(what: &str, check: std::result::Result<solidcraft_smlib::CheckReport, String>) -> std::result::Result<(), KeptRefusal> {
     match check {
         Ok(c) if c.is_valid() => Ok(()),
@@ -297,13 +292,50 @@ fn verdict_counted(what: &str, check: std::result::Result<solidcraft_smlib::Chec
 /// or joined): the feature is not what the check objects to, and refusing it left such a part
 /// impossible to change at all (kaztre#15). `Some((was, now))` then gives the failed tests
 /// before and after, for the feature's warning; `None` is a body the check accepts.
-pub fn check_kept_from(body: &Body, before: Option<&Body>) -> Result<Option<(usize, usize)>> {
+/// (`now` is `None` for a body kept without a check, [`kept_as_refused`].)
+pub fn check_kept_from(body: &Body, before: Option<&Body>) -> Result<Option<(usize, Option<usize>)>> {
     let Err(refused) = check_kept_counted(body) else { return Ok(None) };
     let came_with = before.and_then(|b| check_kept_counted(b).err()).and_then(|r| r.failures);
     match (came_with, refused.failures) {
-        (Some(was), Some(now)) if now <= was => Ok(Some((was, now))),
+        (Some(was), Some(now)) if now <= was => Ok(Some((was, Some(now)))),
         _ => Err(refused.error),
     }
+}
+
+/// Keeps `body`, made from `before`, without a check when the check is already known to refuse
+/// `before`: the failed tests `before` came with, `None` when its verdict is not known or it
+/// passed (the body is then checked as any other). The check of a heavy part takes seconds,
+/// every feature on a defective part paid for it, and its result was kept either way unless it
+/// failed more tests than the part came with. The body takes the verdict of the one it was made
+/// from, so the features after it are not checked either. Not for a feature that mends a body.
+pub fn kept_as_refused(body: &Body, before: &Body) -> Option<usize> {
+    if body.is_mesh() {
+        return None;
+    }
+    let came = known::get(&before.record)?.err()?;
+    let was = came.failures?;
+    if let Some(own) = known::get(&body.record) {
+        return own.is_err().then_some(was);
+    }
+    // The step's own result is not needed for a check: dropped now, not with the body.
+    drop(body.unchecked.as_deref().and_then(|u| u.take(&body.record)));
+    known::put(&body.record, &Err(came));
+    Some(was)
+}
+
+/// [`check_kept_counted`] of a body by its record alone, as SMLib takes it for an operation: for
+/// the body a detached check's body was made from ([`KeptCheck::run_from`]), on that check's
+/// thread, reading nothing the evaluation uses.
+fn check_record(record: &Arc<solidcore_record::brep::Brep>) -> std::result::Result<(), KeptRefusal> {
+    if let Some(known) = known::get(record) {
+        return known;
+    }
+    let check = solidcraft_smlib::Brep::from_record(record, true)
+        .map_err(|e| format!("{e}"))
+        .and_then(|b| b.check_owned(solidcraft_smlib::CheckLevel::All).map_err(|e| format!("check: {e}")));
+    let verdict = verdict_counted("SMLib", check);
+    known::put(record, &verdict);
+    verdict
 }
 
 /// [`check_result`] of a step's result nobody else reads, which it takes: the token over this
@@ -325,7 +357,14 @@ fn check_result_owned(r: solidcraft_smlib::Brep, how: Checked) -> std::result::R
 
 /// [`check_kept`] of a body, ready to run on another thread ([`detach_kept`]), under the token
 /// of the work that detached it: stopping that work stops the check too.
-pub struct KeptCheck(Kept, Option<solidcraft_smlib::stop::Stop>);
+pub struct KeptCheck(Kept, Option<solidcraft_smlib::stop::Stop>, Made);
+
+/// The body a [`KeptCheck`] was detached from, and the one a feature made it from: by their
+/// records, which the check's thread may read while the evaluation goes on.
+struct Made {
+    record: std::sync::Weak<solidcore_record::brep::Brep>,
+    before: Option<Arc<solidcore_record::brep::Brep>>,
+}
 
 enum Kept {
     /// A mesh body: nothing to check.
@@ -340,31 +379,59 @@ enum Kept {
 /// form is copied now, so the check reads nothing the operations after it use and can run on
 /// another thread beside them ([`KeptCheck::run`]).
 pub fn detach_kept(body: &Body) -> KeptCheck {
+    detach_kept_from(body, None)
+}
+
+/// [`detach_kept`] of a body a feature made from `before` (the body it changed, when there was
+/// one): the detached check then keeps a refused body as [`check_kept_from`] does
+/// ([`KeptCheck::run_from`]), on its own thread, where a refusal used to cost the feature a
+/// second evaluation and two more checks in line.
+pub fn detach_kept_from(body: &Body, before: Option<&Body>) -> KeptCheck {
     let stop = solidcraft_smlib::stop::current();
+    let made = Made { record: Arc::downgrade(&body.record), before: before.filter(|b| !b.is_mesh()).map(|b| b.record.clone()) };
     if body.is_mesh() {
-        return KeptCheck(Kept::Nothing, stop);
+        return KeptCheck(Kept::Nothing, stop, made);
     }
     if let Some((u, result)) = body.unchecked.as_deref().and_then(|u| u.take(&body.record).map(|r| (u, r))) {
-        return KeptCheck(Kept::Step { what: u.what.clone(), how: u.how, result }, stop);
+        return KeptCheck(Kept::Step { what: u.what.clone(), how: u.how, result }, stop, made);
     }
-    KeptCheck(Kept::Copy(body.smlib().and_then(|b| b.try_clone().map_err(|e| KernelError::smlib("SMLib copy", e)))), stop)
+    KeptCheck(Kept::Copy(body.smlib().and_then(|b| b.try_clone().map_err(|e| KernelError::smlib("SMLib copy", e)))), stop, made)
 }
 
 impl KeptCheck {
     /// The check: [`check_kept`]'s result for the body it was detached from.
     pub fn run(self) -> Result<()> {
-        let KeptCheck(kept, stop) = self;
-        solidcraft_smlib::stop::scoped(stop, || kept.run())
+        self.run_from().map(|_| ())
+    }
+
+    /// The check: [`check_kept_from`]'s result for the body it was detached from and the one
+    /// that body was made from. The verdict is kept for the body ([`known_refused`]), so the
+    /// feature after this one need not ask for it again.
+    pub fn run_from(self) -> Result<Option<(usize, Option<usize>)>> {
+        let KeptCheck(kept, stop, made) = self;
+        solidcraft_smlib::stop::scoped(stop, || {
+            let verdict = kept.run();
+            if let Some(record) = made.record.upgrade() {
+                known::put(&record, &verdict);
+            }
+            let Err(refused) = verdict else { return Ok(None) };
+            let came_with = made.before.as_ref().and_then(|b| check_record(b).err()).and_then(|r| r.failures);
+            match (came_with, refused.failures) {
+                (Some(was), Some(now)) if now <= was => Ok(Some((was, Some(now)))),
+                _ => Err(refused.error),
+            }
+        })
     }
 }
 
 impl Kept {
-    fn run(self) -> Result<()> {
+    fn run(self) -> std::result::Result<(), KeptRefusal> {
         match self {
             Kept::Nothing => Ok(()),
             // The step's result and the copy are the check's own: the work's token stops it.
-            Kept::Step { what, how, result } => verdict(&what, check_result_owned(result, how)),
-            Kept::Copy(copy) => verdict("SMLib", copy?.check_owned(solidcraft_smlib::CheckLevel::All).map_err(|e| format!("check: {e}"))),
+            Kept::Step { what, how, result } => verdict_counted(&what, check_result_owned(result, how)),
+            Kept::Copy(Ok(copy)) => verdict_counted("SMLib", copy.check_owned(solidcraft_smlib::CheckLevel::All).map_err(|e| format!("check: {e}"))),
+            Kept::Copy(Err(error)) => Err(KeptRefusal { failures: None, error }),
         }
     }
 }
@@ -446,7 +513,18 @@ mod tests {
         let moved = crate::transform_matrix(&bad, [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [5.0, 0.0, 0.0, 1.0]]).unwrap();
         let failures = check_kept_counted(&bad).unwrap_err().failures.unwrap();
         assert!(failures > 0);
-        assert_eq!(check_kept_from(&moved, Some(&bad)).unwrap(), Some((failures, failures)));
+        // Detached, the check keeps it the same way, on the records alone, and its verdict stays.
+        let fresh = Body::from_record(bad.record().clone()).unwrap();
+        let again =
+            crate::transform_matrix(&fresh, [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [7.0, 0.0, 0.0, 1.0]]).unwrap();
+        assert_eq!(detach_kept_from(&again, Some(&fresh)).run_from().unwrap(), Some((failures, Some(failures))));
+        assert!(known_refused(&again) && known_refused(&fresh));
+        assert!(detach_kept_from(&again, None).run_from().is_err());
+        assert!(detach_kept_from(&again, Some(&good)).run_from().is_err());
+        // Made from a body known to be refused, it is kept without a check of its own.
+        assert_eq!(kept_as_refused(&moved, &bad), Some(failures));
+        assert!(known_refused(&moved) && kept_as_refused(&moved, &good).is_none());
+        assert_eq!(check_kept_from(&moved, Some(&bad)).unwrap(), Some((failures, Some(failures))));
         assert_eq!(check_kept_from(&good, Some(&bad)).unwrap(), None);
         let e = check_kept_from(&moved, Some(&good)).unwrap_err().to_string();
         assert!(e.contains("SMLib's check refuses the result"), "{e}");

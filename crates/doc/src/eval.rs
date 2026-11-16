@@ -2013,40 +2013,95 @@ fn validation_digest(validation: kernel::Validation) -> u64 {
 /// when the feature leaves it failing no more tests than it came with: the feature is not what
 /// the check objects to, and refusing it left such a part impossible to cut or join at all
 /// (kaztre#15). The feature then carries a warning naming the body.
-fn check_kept(before: &ModelState, after: &ModelState, warning: &mut Option<String>) -> kernel::Result<()> {
+///
+/// Unless the feature `mends` bodies, one it made from a body the check is already known to
+/// refuse is kept without a check of its own ([`kernel::kept_as_refused`]): the check of a heavy
+/// part takes seconds, and every feature on such a part waited for it.
+fn check_kept(before: &ModelState, after: &ModelState, mends: bool, warning: &mut Option<String>) -> kernel::Result<()> {
     for b in &after.bodies {
         if before.bodies.iter().any(|old| old.body.same_shape(&b.body)) {
             continue;
         }
         let came_from = before.bodies.iter().find(|old| old.name == b.name).map(|old| &old.body);
+        if let Some(was) = came_from.filter(|_| !mends).and_then(|old| kernel::kept_as_refused(&b.body, old)) {
+            append_warning(warning, kept_refused_note(&b.name, was, None));
+            continue;
+        }
         match kernel::check_kept_from(&b.body, came_from) {
             Ok(None) => {}
-            Ok(Some((was, now))) => append_warning(
-                warning,
-                format!(
-                    "body `{}` already failed the modelling kernel's check before this feature ({was} problems, {now} now), so its result is kept unchecked",
-                    b.name
-                ),
-            ),
+            Ok(Some((was, now))) => append_warning(warning, kept_refused_note(&b.name, was, now)),
             Err(e) => return Err(kernel::KernelError::Failed(format!("body `{}`: {e}", b.name))),
         }
     }
     Ok(())
 }
 
+/// The warning of a feature whose body `name` the check refuses and is kept all the same: it
+/// failed `was` tests before the feature and `now` after it (`None`: not checked again).
+fn kept_refused_note(name: &str, was: usize, now: Option<usize>) -> String {
+    match now {
+        Some(now) => format!(
+            "body `{name}` already failed the modelling kernel's check before this feature ({was} problems, {now} now), so its result is kept unchecked"
+        ),
+        None => {
+            format!("body `{name}` already failed the modelling kernel's check before this feature ({was} problems), so its result is kept unchecked")
+        }
+    }
+}
+
 /// [`check_kept`] of bodies whose checks were detached from them ([`kernel::detach_kept`]), by
 /// body name, in order: the first that fails is the feature's error, as there.
-fn run_kept(checks: Vec<(String, kernel::KeptCheck)>) -> kernel::Result<()> {
-    for (name, check) in checks {
-        check.run().map_err(|e| kernel::KernelError::Failed(format!("body `{name}`: {e}")))?;
+/// A body kept although the check refuses it leaves its warning in `notes`, for feature `index`
+/// (`id`), whose result was made before the check ended.
+fn run_kept(checks: Vec<(String, kernel::KeptCheck)>, notes: &overlap::Notes, index: usize, id: u64) -> kernel::Result<()> {
+    // Each body's check on a thread of its own: a feature that changes several heavy bodies
+    // waited for their checks one after the other.
+    let names: Vec<String> = checks.iter().map(|(name, _)| name.clone()).collect();
+    let ran: Vec<kernel::Result<Option<(usize, Option<usize>)>>> = if checks.len() < 2 {
+        checks.into_iter().map(|(_, check)| check.run_from()).collect()
+    } else {
+        std::thread::scope(|scope| {
+            let started: Vec<_> = checks
+                .into_iter()
+                .map(|(_, check)| {
+                    // Taken by whichever runs it: the thread, or this one when it cannot start.
+                    let shared = std::sync::Mutex::new(Some(check));
+                    let shared = Arc::new(shared);
+                    let taken = shared.clone();
+                    let thread = kernel::kernel_thread("feature-check")
+                        .spawn_scoped(scope, move || taken.lock().ok().and_then(|mut c| c.take()).map(|c| c.run_from()));
+                    (shared, thread)
+                })
+                .collect();
+            started
+                .into_iter()
+                .map(|(shared, thread)| match thread {
+                    Ok(done) => match done.join() {
+                        Ok(Some(r)) => r,
+                        Ok(None) => Ok(None),
+                        Err(_) => Err(kernel::KernelError::Internal("the check's thread stopped".into())),
+                    },
+                    Err(_) => match shared.lock().ok().and_then(|mut c| c.take()) {
+                        Some(check) => check.run_from(),
+                        None => Ok(None),
+                    },
+                })
+                .collect()
+        })
+    };
+    for (name, r) in names.into_iter().zip(ran) {
+        match r {
+            Ok(None) => {}
+            Ok(Some((was, now))) => notes.push(index, id, kept_refused_note(&name, was, now)),
+            Err(e) => return Err(kernel::KernelError::Failed(format!("body `{name}`: {e}"))),
+        }
     }
     Ok(())
 }
 
 /// Whether a feature changed a body the check is already known to refuse (`after`'s bodies not
-/// in `before`, by the body of that name there): its result is checked in line, where it may be
-/// kept ([`check_kept`]), not beside the features after it, where a refusal costs the feature
-/// and a second check. Nothing is checked here.
+/// in `before`, by the body of that name there): its result is kept in line without a check
+/// ([`check_kept`]), where the warning is the feature's at once. Nothing is checked here.
 fn changes_a_refused_body(before: &ModelState, after: &ModelState) -> bool {
     after
         .bodies
@@ -3595,9 +3650,21 @@ impl Model {
                 // The bodies whose check runs beside the features after this one.
                 let mut apart: Option<Vec<(String, kernel::KeptCheck)>> = None;
                 let refused = checks.refused(i);
+                // A Repair Part feature is checked like any other: it may mend a refused body.
+                let mends = matches!(f.kind, FeatureKind::Repair { .. });
                 let mut r = match frame_error.or(bad_param) {
                     _ if cached.is_some() => Ok(()),
                     Some(e) => Err(kernel::KernelError::Failed(e)),
+                    None if refused.is_some() => {
+                        let refused = refused.clone().map(|x| (x.error, x.warning, x.import_report, x.repair));
+                        match refused {
+                            Some((e, w, ir, rp)) => {
+                                (warning, import_report, repair) = (w, ir, rp);
+                                Err(e)
+                            }
+                            None => Ok(()),
+                        }
+                    }
                     None => kernel::guard(&f.name, || {
                         let _val_guard = EvalValidationGuard(EVAL_VALIDATION.replace(validation));
                         let (r, deferred) =
@@ -3615,26 +3682,19 @@ impl Model {
                         // The checks the feature's steps left to its end: the bodies it keeps.
                         if !deferred {
                             Ok(())
-                        } else if let Some(detached) =
-                            checks.detach(&state, &next).filter(|_| refused.is_none() && !changes_a_refused_body(&state, &next))
-                        {
-                            apart = Some(detached);
-                            Ok(())
+                        } else if mends || !changes_a_refused_body(&state, &next) {
+                            match checks.detach(&state, &next) {
+                                Some(detached) => {
+                                    apart = Some(detached);
+                                    Ok(())
+                                }
+                                None => check_kept(&state, &next, mends, &mut warning),
+                            }
                         } else {
-                            check_kept(&state, &next, &mut warning)
+                            check_kept(&state, &next, mends, &mut warning)
                         }
                     }),
                 };
-                // A feature whose check, running beside the features after it, refused its bodies
-                // is evaluated again here with the check in line, which keeps a body that was
-                // refused before the feature and is no worse after it (kaztre#15). Refused again,
-                // it ends as that check ended it.
-                if r.is_err()
-                    && let Some(x) = &refused
-                {
-                    (warning, import_report, repair) = (x.warning.clone(), x.import_report.clone(), x.repair.clone());
-                    r = Err(x.error.clone());
-                }
                 if r.is_ok()
                     && let Some(after) = apart.take()
                 {
@@ -3661,7 +3721,8 @@ impl Model {
                         ms: t0.elapsed().as_secs_f64() * 1000.0,
                     };
                     let name = f.name.clone();
-                    r = checks.start(i, saved, failure, move || kernel::guard(&name, || run_kept(after)));
+                    let (notes, id) = (checks.notes(), f.id);
+                    r = checks.start(i, saved, failure, move || kernel::guard(&name, || run_kept(after, &notes, i, id)));
                 }
                 if r.is_ok() && cached.is_none() {
                     // Profiles picked by curves that no longer bound a profile exactly were found
@@ -3789,6 +3850,8 @@ impl Model {
                 back = Some(refused);
                 continue 'pass;
             }
+            // A check that kept a body it refuses says so on its feature.
+            checks.note(&mut out);
             break;
         }
         self.placement_local = self.placement_local && out.iter().all(|r| !r.skipped && !r.stale && !r.unkept && r.error.is_none());
