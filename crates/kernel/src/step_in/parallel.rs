@@ -190,9 +190,9 @@ fn smlib_body(record: &solidcore_record::brep::Brep) -> std::result::Result<(Bod
 }
 
 /// Whether SMLib's face `i` of a body made from `record` (the body's face `body_order[i]`, or `i`
-/// for an empty order) is the record's face `i`, face by face: the same kind of surface, the same
-/// loops of the same lengths, each loop through the same corners (within the vertices' and the
-/// records' tolerances, whichever way and from wherever SMLib walks it).
+/// for an empty order) is the record's face `i`, face by face: the same kind of surface
+/// ([`same_kind`]), the same loops of the same lengths, each loop through the same corners (within
+/// the vertices' and the records' tolerances, whichever way and from wherever SMLib walks it).
 fn faces_in_record_order(record: &solidcore_record::brep::Brep, body: &solidcore_record::brep::Brep, body_order: &[usize]) -> bool {
     use solidcore_record::brep::{Brep, Loop};
     if record.faces.len() != body.faces.len() || !(body_order.is_empty() || body_order.len() == body.faces.len()) {
@@ -216,7 +216,7 @@ fn faces_in_record_order(record: &solidcore_record::brep::Brep, body: &solidcore
     (0..record.faces.len()).all(|i| {
         let at = if body_order.is_empty() { Some(i) } else { body_order.get(i).copied() };
         let (Some(a), Some(b)) = (record.faces.get(i), at.and_then(|k| body.faces.get(k))) else { return false };
-        if std::mem::discriminant(&a.surface) != std::mem::discriminant(&b.surface) || a.loops.len() != b.loops.len() {
+        if !same_kind(&a.surface, &b.surface) || a.loops.len() != b.loops.len() {
             return false;
         }
         a.loops.iter().zip(&b.loops).all(|(x, y)| {
@@ -225,6 +225,17 @@ fn faces_in_record_order(record: &solidcore_record::brep::Brep, body: &solidcore
                 && p.iter().all(|(u, tu)| q.iter().any(|(w, tw)| (0..3).map(|k| (u[k] - w[k]).powi(2)).sum::<f64>().sqrt() <= tu + tw + slack))
         })
     })
+}
+
+/// Whether SMLib's surface `body` is of the kind the record's surface `record` comes back as: its
+/// own, or the cylinder SMLib's import makes of a rational spline that is a circle swept straight
+/// along its axis (a sleeve a file writes as a B-spline surface: `solidcraft_smlib`'s analytic
+/// surfaces). SMLib walks such a face from where it likes on its cylinder, so its edges and
+/// vertices are numbered otherwise than the record's, and the face is known by its loops alone.
+fn same_kind(record: &solidcore_record::brep::Surface, body: &solidcore_record::brep::Surface) -> bool {
+    use solidcore_record::brep::Surface;
+    std::mem::discriminant(record) == std::mem::discriminant(body)
+        || matches!((record, body), (Surface::RationalSpline { .. }, Surface::Cylinder { .. }))
 }
 
 /// The face of its one operand each face of `body` is, from its history.

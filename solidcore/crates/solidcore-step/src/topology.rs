@@ -2016,10 +2016,10 @@ impl Builder<'_, '_> {
                 if !matches!(edge.curve, BCurve::Spline { .. } | BCurve::RationalSpline { .. }) {
                     continue;
                 }
-                let Ok(ends) = wound::piece_ends(&label, &edge.curve, edge.interval, self.tol) else { continue };
+                let Ok((ends, points)) = wound::piece_ends(&label, &edge.curve, edge.interval, self.tol) else { continue };
                 let pieces = ends.len().saturating_sub(1);
                 let half = MAX_SPLINE_POINTS >> 1;
-                let parts = wound::points_of(pieces).saturating_add(half.saturating_sub(1)).checked_div(half).unwrap_or(0);
+                let parts = points.saturating_add(half.saturating_sub(1)).checked_div(half).unwrap_or(0);
                 if parts < 2 {
                     continue;
                 }

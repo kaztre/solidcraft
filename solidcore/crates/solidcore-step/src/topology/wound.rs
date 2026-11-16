@@ -138,6 +138,85 @@ impl Axis {
         let (u, scale) = along(theta);
         Ok(End { t, theta, u, v: s.height, du: scale * s.d_theta, dv: s.d_height, d_theta: s.d_theta })
     }
+
+    /// `e` with the slopes the curve's first derivative `d` gives there: one side's, at a break of
+    /// the curve ([`breaks`]), where the point is one and the derivative two.
+    fn sided(&self, c: &CurveEval, e: End, d: Vec3) -> R<End> {
+        let r = c.point(e.t).ok_or("an edge point")? - self.origin;
+        let (x, y) = (r.dot(self.x), r.dot(self.y));
+        let round = x * x + y * y;
+        if !(round > 1e-18) {
+            return Err(unsupported("an edge of a face that winds round its axis on the axis"));
+        }
+        let d_theta = (x * d.dot(self.y) - y * d.dot(self.x)) / round;
+        let (_, scale) = along(e.theta);
+        Ok(End { du: scale * d_theta, dv: d.dot(self.z), d_theta, ..e })
+    }
+}
+
+/// A spline curve's degree, knots and homogeneous control points; `None` for any other curve.
+fn spline_of(curve: &BCurve) -> Option<(usize, &[f64], Vec<[f64; 4]>)> {
+    let (knots, homogeneous): (&Vec<f64>, Vec<[f64; 4]>) = match curve {
+        BCurve::Spline { knots, points } => (knots, points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect()),
+        BCurve::RationalSpline { knots, homogeneous } => (knots, homogeneous.clone()),
+        _ => return None,
+    };
+    let degree = knots.len().checked_sub(homogeneous.len() + 1).filter(|p| *p >= 1)?;
+    Some((degree, knots, homogeneous))
+}
+
+/// The breaks of a spline of `degree` within `[a, b]`: its knots of multiplicity `degree` or
+/// more, where its pieces meet in a point only and its first derivative may differ from one side
+/// to the other (a helix written piece by piece, each at its own pace in the parameter).
+fn breaks(degree: usize, knots: &[f64], a: f64, b: f64) -> Vec<f64> {
+    let mut out = Vec::new();
+    let (mut last, mut run) = (f64::NAN, 0_usize);
+    for &k in knots {
+        run = if k == last { run + 1 } else { 1 };
+        last = k;
+        if run == degree && k >= a && k <= b {
+            out.push(k);
+        }
+    }
+    out
+}
+
+/// The first derivative of a spline at its knot `t` from one side (`before`: from below): that of
+/// the Bézier piece it has on that side, at the piece's end. `None` where it has no piece there
+/// (an end of its knots) or the piece is not one.
+fn one_sided(degree: usize, knots: &[f64], homogeneous: &[[f64; 4]], t: f64, before: bool) -> Option<Vec3> {
+    let other = if before {
+        knots.iter().copied().filter(|k| *k < t).fold(f64::NEG_INFINITY, f64::max)
+    } else {
+        knots.iter().copied().filter(|k| *k > t).fold(f64::INFINITY, f64::min)
+    };
+    if !other.is_finite() {
+        return None;
+    }
+    let (lo, hi) = if before { (other, t) } else { (t, other) };
+    let (_, piece) = solidcore::eval::pcurve::segment(degree, knots, homogeneous, lo, hi).ok()?;
+    if piece.len() != degree + 1 {
+        return None;
+    }
+    // The end at `t` and the control point next to it; the derivative there runs from the
+    // first towards the second, or from the second to the first at the piece's far end.
+    let (at, next) = if before { (piece.last()?, piece.get(degree.checked_sub(1)?)?) } else { (piece.first()?, piece.get(1)?) };
+    let w = at[3];
+    if !(w > 0.0) {
+        return None;
+    }
+    let scale = degree as f64 / (hi - lo) * if before { -1.0 } else { 1.0 };
+    let dh: [f64; 4] = std::array::from_fn(|i| scale * (next.get(i).copied().unwrap_or(0.0) - at.get(i).copied().unwrap_or(0.0)));
+    // The quotient rule on the homogeneous point.
+    let p = Vec3::new(at[0] / w, at[1] / w, at[2] / w);
+    let d = (Vec3::new(dh[0], dh[1], dh[2]) - p * dh[3]) * (1.0 / w);
+    (d.x.is_finite() && d.y.is_finite() && d.z.is_finite()).then_some(d)
+}
+
+/// Whether the piece ending at `q` and the one starting at `p` (the same point) join with one
+/// slope: the same end, not the two sides of a break.
+fn smooth(q: &End, p: &End) -> bool {
+    q.du.to_bits() == p.du.to_bits() && q.dv.to_bits() == p.dv.to_bits()
 }
 
 /// The knots of a spline `curve` strictly inside `(a, b)` (none for any other curve).
@@ -159,17 +238,22 @@ pub(super) fn pcurve(label: &BSurface, curve: &BCurve, interval: [f64; 2], tol: 
     // curve's parameter, so the pieces join with a continuous first derivative, and each interior
     // knot is twofold: the shared end is then where the spline passes between its neighbouring
     // control points (`h2 (q - h1 q'/3) + h1 (q + h2 q'/3)` over `h1 + h2` is `q`), the same curve
-    // with two control points a piece rather than three ([`points_of`]).
+    // with two control points a piece rather than three ([`points_of`]). At a break of the edge's
+    // curve the two pieces have each their own slope: the knot is threefold and the shared end a
+    // control point.
     let mut knots = vec![a; 4];
     let mut points = vec![[first.u, first.v]];
     for (k, [p, q]) in done.iter().enumerate() {
         let h = q.t - p.t;
         points.push([p.u + h * p.du / 3.0, p.v + h * p.dv / 3.0]);
         points.push([q.u - h * q.du / 3.0, q.v - h * q.dv / 3.0]);
-        if k + 1 < done.len() {
-            knots.extend([q.t; 2]);
-        } else {
-            points.push([q.u, q.v]);
+        match done.get(k + 1) {
+            Some([next, _]) if smooth(q, next) => knots.extend([q.t; 2]),
+            Some(_) => {
+                points.push([q.u, q.v]);
+                knots.extend([q.t; 3]);
+            }
+            None => points.push([q.u, q.v]),
         }
     }
     knots.extend([b; 4]);
@@ -184,18 +268,20 @@ pub(super) fn pcurve(label: &BSurface, curve: &BCurve, interval: [f64; 2], tol: 
 }
 
 /// The parameters where the pcurve of the edge on `curve` over `interval` ([`pcurve`]) has its
-/// pieces' ends: one more than its pieces.
+/// pieces' ends, one more than its pieces, and the control points it takes ([`points_of`]).
 ///
 /// # Errors
 /// As [`pcurve`].
-pub(super) fn piece_ends(label: &BSurface, curve: &BCurve, interval: [f64; 2], tol: f64) -> R<Vec<f64>> {
+pub(super) fn piece_ends(label: &BSurface, curve: &BCurve, interval: [f64; 2], tol: f64) -> R<(Vec<f64>, usize)> {
     let (first, done) = hermite_pieces(label, curve, interval, tol)?;
-    Ok(std::iter::once(first.t).chain(done.iter().map(|[_, q]| q.t)).collect())
+    Ok((std::iter::once(first.t).chain(done.iter().map(|[_, q]| q.t)).collect(), points_of(&done)))
 }
 
-/// The control points of a pcurve of `pieces` pieces ([`pcurve`]): two a piece, and both ends.
-pub(super) fn points_of(pieces: usize) -> usize {
-    pieces.saturating_mul(2).saturating_add(2)
+/// The control points of a pcurve of the pieces `done` ([`pcurve`]): two a piece and both ends,
+/// and one more at each break of the edge's curve between two pieces.
+fn points_of(done: &[[End; 2]]) -> usize {
+    let at_breaks = done.iter().zip(done.iter().skip(1)).filter(|([_, q], [p, _])| !smooth(q, p)).count();
+    done.len().saturating_mul(2).saturating_add(2).saturating_add(at_breaks)
 }
 
 /// The Hermite pieces of [`pcurve`], in order, and the first one's start.
@@ -233,13 +319,29 @@ fn hermite_pieces(label: &BSurface, curve: &BCurve, [a, b]: [f64; 2], tol: f64) 
         let guess = prev.theta + 0.5 * (t - prev.t) * (prev.d_theta + ax.spot(&c, t)?.d_theta);
         ends.push(ax.end(&c, t, Some(guess))?);
     }
-    let mut pieces: Vec<[End; 2]> = ends
-        .windows(2)
-        .filter_map(|w| match w {
-            [a, b] => Some([*a, *b]),
-            _ => None,
-        })
-        .collect();
+    // At a break of the edge's curve (a knot where its pieces meet in a point only) the curve
+    // has a first derivative on each side: a piece takes the one on its own side at each of its
+    // ends. With one slope for both, the piece on the other side was a cubic through a slope its
+    // curve does not have there, off it by a share of the piece's length that no halving mends
+    // (the bound below is of the remainder of the cubic through the piece's own slopes).
+    let spline = spline_of(curve);
+    let kinks = spline.as_ref().map_or_else(Vec::new, |(degree, knots, _)| breaks(*degree, knots, a.min(b), a.max(b)));
+    let near = 1e-12 * (b - a).abs();
+    let side = |e: End, before: bool| -> R<End> {
+        let Some((degree, knots, homogeneous)) = &spline else { return Ok(e) };
+        let i = kinks.partition_point(|k| *k < e.t - near);
+        let Some(&k) = kinks.get(i).filter(|k| (**k - e.t).abs() <= near) else { return Ok(e) };
+        match one_sided(*degree, knots, homogeneous, k, before) {
+            Some(d) => ax.sided(&c, e, d),
+            None => Ok(e),
+        }
+    };
+    let mut pieces: Vec<[End; 2]> = Vec::with_capacity(ends.len());
+    for w in ends.windows(2) {
+        if let [p, q] = w {
+            pieces.push(if a < b { [side(*p, false)?, side(*q, true)?] } else { [*p, *q] });
+        }
+    }
     let mut done: Vec<[End; 2]> = Vec::new();
     let mut halvings = vec![0u32; pieces.len()];
     pieces.reverse();

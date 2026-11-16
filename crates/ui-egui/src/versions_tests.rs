@@ -13,7 +13,13 @@ fn settle(h: &mut Harness, done: impl Fn(&crate::SolveApp) -> bool) {
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    panic!("never settled: status {:?}, history {}, saving {}, last message {:?}", status(&h.app), history_len(&h.app), h.app.saving.is_some(), h.app.status);
+    panic!(
+        "never settled: status {:?}, history {}, saving {}, last message {:?}",
+        status(&h.app),
+        history_len(&h.app),
+        h.app.saving.is_some(),
+        h.app.status
+    );
 }
 
 fn status(app: &crate::SolveApp) -> Option<serde_json::Value> {
