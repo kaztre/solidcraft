@@ -163,6 +163,22 @@ mod tests {
         // A body without tolerant edges states its own tolerance, as before.
         let text = crate::step_export(&[&bx], "test").unwrap();
         assert_eq!(stated(&text), vec![own]);
+        // Written together, each body states its own: one stated for the file made the box as
+        // loose as the tolerant body, and read back its faces narrower than that were lost (a
+        // thruster's screws beside a nozzle with an edge 0.43 mm off its face; 17 of 20 opened).
+        let text = crate::step_export(&[&tolerant, &bx], "test").unwrap();
+        let mut both = stated(&text);
+        both.sort_by(f64::total_cmp);
+        assert_eq!(both, vec![own, 4e-3]);
+        let imp = crate::step_import(&text).unwrap();
+        assert_eq!(imp.bodies.len(), 2);
+        // Read back by context, the box (written second, "Body2") may come first.
+        let loosest = |name: &str| {
+            let b = imp.bodies.iter().find(|b| b.name == name).unwrap();
+            b.body.record().edges.iter().map(|e| e.tolerance).fold(0.0, f64::max)
+        };
+        assert!(loosest("Body2") < 1e-4, "the box read back at {}", loosest("Body2"));
+        assert!(loosest("Body1") >= 3e-3, "the tolerant body read back at {}", loosest("Body1"));
     }
 
     #[test]

@@ -231,18 +231,22 @@ pub fn products(products: &[ExportProduct], root: usize, header: &Header) -> Res
             return Err(ExportError::Face { name: b.name.clone(), face, faces });
         }
     }
-    // The context states the models' accuracy: the loosest tolerance of their records, edges
-    // and vertices. STEP keeps no tolerance per edge, so an edge that lies off its faces (an
-    // intersection curve fitted within its tolerance) is only as good as the file says (#11997).
-    let uncertainty = reached
-        .iter()
-        .flat_map(|(_, p)| &p.bodies)
-        .flat_map(|b| {
-            let r = b.record;
-            std::iter::once(r.tolerance).chain(r.edges.iter().map(|e| e.tolerance)).chain(r.vertices.iter().map(|v| v.tolerance))
-        })
-        .filter(|t| t.is_finite())
-        .fold(MIN_UNCERTAINTY, f64::max);
+    // A context states its models' accuracy. STEP keeps no tolerance per edge, so an edge that
+    // lies off its faces (an intersection curve fitted within its tolerance) is only as good as
+    // its context says (#11997): each body is written in a context that states the loosest
+    // tolerance of its own record, edges and vertices. One stated for the whole file made every
+    // body as loose as the loosest (a thruster whose nozzle has an edge 0.43 mm off its face:
+    // read back, its screws' faces narrower than that were lost and 17 of its 20 solids opened).
+    let body_uncertainty = |b: &ExportBody| {
+        let r = b.record;
+        std::iter::once(r.tolerance)
+            .chain(r.edges.iter().map(|e| e.tolerance))
+            .chain(r.vertices.iter().map(|v| v.tolerance))
+            .filter(|t| t.is_finite())
+            .fold(MIN_UNCERTAINTY, f64::max)
+    };
+    // The loosest of them all: the context of what is no body (placements, presentation).
+    let uncertainty = reached.iter().flat_map(|(_, p)| &p.bodies).map(body_uncertainty).fold(MIN_UNCERTAINTY, f64::max);
 
     let mut w = Writer::new();
     let app = w.add_distinct("APPLICATION_CONTEXT", &[s("managed model based 3d engineering")]);
@@ -267,16 +271,26 @@ pub fn products(products: &[ExportProduct], root: usize, header: &Header) -> Res
         ("SI_UNIT", vec![Param::Null, Param::Enum("STERADIAN".into())]),
         ("SOLID_ANGLE_UNIT", vec![]),
     ]);
-    let unc = w.add_distinct(
-        "UNCERTAINTY_MEASURE_WITH_UNIT",
-        &[Param::Typed("LENGTH_MEASURE".into(), vec![Param::Real(uncertainty)]), r(mm), s("distance_accuracy_value"), s("confusion accuracy")],
-    );
-    let ctx = w.add_complex(&[
-        ("GEOMETRIC_REPRESENTATION_CONTEXT", vec![Param::Int(3)]),
-        ("GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT", vec![refs(&[unc])]),
-        ("GLOBAL_UNIT_ASSIGNED_CONTEXT", vec![refs(&[mm, rad, sr])]),
-        ("REPRESENTATION_CONTEXT", vec![s("Context #1"), s("3D Context with UNIT and UNCERTAINTY")]),
-    ]);
+    // The context stating `uncertainty`, made once for each value.
+    let mut contexts: Vec<(u64, u64)> = Vec::new();
+    let mut context = |w: &mut Writer, uncertainty: f64| -> u64 {
+        if let Some((_, id)) = contexts.iter().find(|(bits, _)| *bits == uncertainty.to_bits()) {
+            return *id;
+        }
+        let unc = w.add_distinct(
+            "UNCERTAINTY_MEASURE_WITH_UNIT",
+            &[Param::Typed("LENGTH_MEASURE".into(), vec![Param::Real(uncertainty)]), r(mm), s("distance_accuracy_value"), s("confusion accuracy")],
+        );
+        let id = w.add_complex(&[
+            ("GEOMETRIC_REPRESENTATION_CONTEXT", vec![Param::Int(3)]),
+            ("GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT", vec![refs(&[unc])]),
+            ("GLOBAL_UNIT_ASSIGNED_CONTEXT", vec![refs(&[mm, rad, sr])]),
+            ("REPRESENTATION_CONTEXT", vec![s("Context #1"), s("3D Context with UNIT and UNCERTAINTY")]),
+        ]);
+        contexts.push((uncertainty.to_bits(), id));
+        id
+    };
+    let ctx = context(&mut w, uncertainty);
     let origin =
         GeomWriter::new(&mut w).placement(&crate::geom::Placement { origin: [0.0; 3], axis: [0.0, 0.0, 1.0], ref_direction: [1.0, 0.0, 0.0] });
 
@@ -315,7 +329,17 @@ pub fn products(products: &[ExportProduct], root: usize, header: &Header) -> Res
         if let Some(slot) = shape_rep.get_mut(pi) {
             *slot = srep;
         }
-        let (mut solids, mut sheets) = (Vec::new(), Vec::new());
+        // The product's solids and sheets, each list by the accuracy its bodies state.
+        let (mut solids, mut sheets): (Vec<(f64, Vec<u64>)>, Vec<(f64, Vec<u64>)>) = (Vec::new(), Vec::new());
+        let put = |lists: &mut Vec<(f64, Vec<u64>)>, at: f64, items: Vec<u64>| {
+            if items.is_empty() {
+                return;
+            }
+            match lists.iter_mut().find(|(u, _)| u.to_bits() == at.to_bits()) {
+                Some((_, list)) => list.extend(items),
+                None => lists.push((at, items)),
+            }
+        };
         for b in &p.bodies {
             let before = w.non_finite();
             let written = topology::brep(&mut GeomWriter::new(&mut w), b.record, &b.name)
@@ -335,15 +359,16 @@ pub fn products(products: &[ExportProduct], root: usize, header: &Header) -> Res
                     styled.push(style(&mut w, face, c));
                 }
             }
-            solids.extend(written.solids);
-            sheets.extend(written.sheets);
+            let at = body_uncertainty(b);
+            put(&mut solids, at, written.solids);
+            put(&mut sheets, at, written.sheets.into_iter().collect());
         }
-        for (kind, list) in [("ADVANCED_BREP_SHAPE_REPRESENTATION", solids), ("MANIFOLD_SURFACE_SHAPE_REPRESENTATION", sheets)] {
-            if list.is_empty() {
-                continue;
+        for (kind, lists) in [("ADVANCED_BREP_SHAPE_REPRESENTATION", solids), ("MANIFOLD_SURFACE_SHAPE_REPRESENTATION", sheets)] {
+            for (at, list) in lists {
+                let own = context(&mut w, at);
+                let rep = w.add_distinct(kind, &[s(&name), refs(&[list, vec![origin]].concat()), r(own)]);
+                w.add_distinct("SHAPE_REPRESENTATION_RELATIONSHIP", &[s(""), s(""), r(srep), r(rep)]);
             }
-            let rep = w.add_distinct(kind, &[s(&name), refs(&[list, vec![origin]].concat()), r(ctx)]);
-            w.add_distinct("SHAPE_REPRESENTATION_RELATIONSHIP", &[s(""), s(""), r(srep), r(rep)]);
         }
     }
     if !product_ids.is_empty() {
