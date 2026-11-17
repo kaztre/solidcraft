@@ -1170,8 +1170,18 @@ fn v_toggles_what_is_selected() {
     app.run("select.clear", json!({})).unwrap();
     app.tree.picked_components = vec![app.session.doc.components[0].id];
     context_menu::toggle_visibility(&mut app);
-    assert_eq!(app.session.visibility.hidden_bodies, vec![b]);
+    assert_eq!(app.session.visibility.hidden_bodies, vec![b.clone()]);
     assert_eq!(find(&context_menu::items(&app, &Target::Body { name: body(&app) }), "Show/Hide").shortcut, "V");
+    // A click in the view that replaces the selection lets the browser's picked component go: V
+    // on the plane just clicked used to flip the component's bodies with it (everything in the
+    // design vanished, where the pick was the top component).
+    context_menu::toggle_visibility(&mut app);
+    assert!(app.session.visibility.hidden_bodies.is_empty());
+    crate::viewport::select(&mut app, Some(solidcraft_engine::Sel::Plane { name: "XY".into() }), false, false);
+    assert!(app.tree.picked_components.is_empty(), "the click replaced what was picked");
+    context_menu::toggle_visibility(&mut app);
+    assert!(app.session.visibility.hidden_bodies.is_empty(), "only the clicked plane is hidden");
+    assert!(app.session.visibility.hidden_origin.iter().any(|h| h == "XY"));
 }
 
 /// V pressed with a browser menu open runs that menu's Show/Hide, as its row says, on the row

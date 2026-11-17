@@ -7238,8 +7238,13 @@ fn paint_toast_ext(
 /// are only added.
 pub(crate) fn select(app: &mut SolveApp, sel: Option<Sel>, add: bool, toggle: bool) {
     if !add {
-        // A joint picked in the browser (highlighted even when hidden) lets go.
+        // A joint picked in the browser (highlighted even when hidden) lets go, and so do the
+        // components and canvases picked there: they are not in the selection, so a click that
+        // replaces it left them picked, and V on the part just clicked hid their bodies with it
+        // (every body of the design, where the pick was the top component).
         app.tree.picked_joints.clear();
+        app.tree.picked_components.clear();
+        app.tree.picked_canvases.clear();
     }
     match sel {
         Some(x) => {
@@ -7624,6 +7629,12 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
         d.take_box(&app.session, out, add);
         app.dialog = Some(d);
         return;
+    }
+    if !add {
+        // As a click that replaces the selection ([`select`]): what was picked in the browser lets go.
+        app.tree.picked_joints.clear();
+        app.tree.picked_components.clear();
+        app.tree.picked_canvases.clear();
     }
     let items = serde_json::to_value(&out).unwrap_or_default();
     let _ = app.run("select.set", json!({"items": items, "add": add}));
