@@ -568,11 +568,12 @@ fn fillet_fitted(
     fit: crate::FilletFit,
     turn: kernel::FilletTurn,
 ) -> std::result::Result<(kernel::Body, Option<Vec<f64>>, Vec<Vec3>), kernel::KernelError> {
+    let began = now();
     match kernel::fillet_removing(body, edges, r, turn) {
         Ok((b, gone)) => Ok((b, None, gone)),
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact => Err({
-            let hint = kernel::named_fit(&why);
-            with_largest_fit(why, "radius", || kernel::fillet_max_why(body, edges, r, turn, hint))
+            let (hint, spent) = (kernel::named_fit(&why), began.elapsed());
+            with_largest_fit(why, "radius", || kernel::fillet_max_why(body, edges, r, turn, hint, spent))
         }),
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Reduce => match kernel::fillet_max_each(body, edges, r, turn)? {
             // Built at the radius asked for after all (the groups apart): nothing reduced.
@@ -642,6 +643,16 @@ fn with_largest_fit(
             show_mm(at),
             kernel::without_fit_note(&e.to_string())
         )),
+        // Not searched: the refused blend alone took the search's time. solidcore's own estimate
+        // stays, said as one (no candidate was built at it).
+        Ok(kernel::FitSearch { found: None, smallest_refused: None, stopped: true, .. }) => {
+            kernel::KernelError::TooLarge(match kernel::named_fit(&why) {
+                Some(near) => {
+                    format!("{}; a {size} near {} mm may fit (not tried: this blend is slow to build)", kernel::without_fit_note(&why), show_mm(near))
+                }
+                None => kernel::without_fit_note(&why),
+            })
+        }
         Ok(kernel::FitSearch { found: None, smallest_refused: None, .. }) => kernel::KernelError::TooLarge(kernel::without_fit_note(&why)),
         Err(e) => {
             log::debug!("the largest {size} that fits: {e}");
@@ -4103,6 +4114,18 @@ mod largest_fit_tests {
         assert!(!e.contains("that fits is"), "{e}");
         assert!(e.contains("no smaller radius builds either (down to 0.001 mm: "), "{e}");
         assert!(e.contains("the trim leaks"), "{e}");
+    }
+
+    /// A search not run (the refused blend alone took its time) keeps solidcore's estimate, said
+    /// as one: no candidate was built at it.
+    #[test]
+    fn a_search_not_run_says_the_estimate_as_one() {
+        let not_run = || Ok(kernel::FitSearch { found: None, smallest_refused: None, tried: 0, stopped: true });
+        let e = with_largest_fit("the round leaves its face; the largest radius that fits is 0.325 mm".into(), "radius", not_run).to_string();
+        assert!(!e.contains("that fits is"), "{e}");
+        assert!(e.contains("a radius near 0.325 mm may fit (not tried"), "{e}");
+        let e = with_largest_fit("the round leaves its face".into(), "radius", not_run).to_string();
+        assert!(e.ends_with("the round leaves its face"), "{e}");
     }
 
     /// A candidate failing for another reason stops the search: that reason is said, not the
@@ -9812,12 +9835,12 @@ fn chamfer_with(
     };
     Ok(match side {
         Some(s) => kernel::chamfer_sides_carrying_face(b, edges, d, s, flip)?,
-        None => match kernel::chamfer_carrying_face(b, edges, d) {
-            Err(kernel::KernelError::TooLarge(why)) => {
-                let hint = kernel::named_fit(&why);
-                return Err(with_largest_fit(why, "distance", || kernel::chamfer_max_why(b, edges, d, hint)).into());
+        None => match (now(), kernel::chamfer_carrying_face(b, edges, d)) {
+            (began, Err(kernel::KernelError::TooLarge(why))) => {
+                let (hint, spent) = (kernel::named_fit(&why), began.elapsed());
+                return Err(with_largest_fit(why, "distance", || kernel::chamfer_max_why(b, edges, d, hint, spent)).into());
             }
-            other => other?,
+            (_, other) => other?,
         },
     })
 }

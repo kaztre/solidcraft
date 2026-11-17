@@ -799,14 +799,34 @@ pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) ->
 /// How long a search for the size to name in a refusal runs before it stops with what it has
 /// ([`fillet_max_why`], [`chamfer_max_why`]): the feature is refused either way, and on a heavy
 /// body each candidate takes seconds (twelve blade roots of an imported rotor: 194 s of
-/// candidates to say a 1 mm round does not fit). The candidate being built is finished.
+/// candidates to say a 1 mm round does not fit). The candidate being built is finished. The
+/// refused blend itself counts: where it alone ran this long, every candidate would too (a
+/// round along a blade's edge: 10 s to refuse, then 15 s for the first candidate), so nothing
+/// is searched ([`FitSearch::stopped`], nothing found).
 const WHY_BUDGET: std::time::Duration = std::time::Duration::from_secs(8);
 
+/// What is left of [`WHY_BUDGET`] after the refused blend ran for `spent`; `None`: nothing.
+fn why_budget_left(spent: std::time::Duration) -> Option<std::time::Duration> {
+    WHY_BUDGET.checked_sub(spent).filter(|left| !left.is_zero())
+}
+
+/// The search that was not run: out of time before its first candidate.
+const NOT_SEARCHED: FitSearch = FitSearch { found: None, smallest_refused: None, tried: 0, stopped: true };
+
 /// [`fillet_max`], with what the search found when nothing builds ([`FitSearch`]). `hint`: the
-/// largest radius the refusal of `radius` named ([`named_fit`]), tried first.
-pub fn fillet_max_why(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn, hint: Option<f64>) -> Result<FitSearch> {
+/// largest radius the refusal of `radius` named ([`named_fit`]), tried first. `spent`: how long
+/// the refused blend ran.
+pub fn fillet_max_why(
+    body: &Body,
+    edges: &[Vec3],
+    radius: f64,
+    turn: FilletTurn,
+    hint: Option<f64>,
+    spent: std::time::Duration,
+) -> Result<FitSearch> {
+    let Some(left) = why_budget_left(spent) else { return Ok(NOT_SEARCHED) };
     let _span = solidcraft_profile::span("kernel", "fillet_max");
-    largest_that_fits(radius, hint, Some(WHY_BUDGET), |r| fillet_turning(body, edges, r, turn))
+    largest_that_fits(radius, hint, Some(left), |r| fillet_turning(body, edges, r, turn))
 }
 
 /// [`fillet_max`] for an equal-distance chamfer of these edges: the largest distance below
@@ -817,10 +837,11 @@ pub fn chamfer_max(body: &Body, edges: &[Vec3], distance: f64) -> Result<Option<
 }
 
 /// [`chamfer_max`], with what the search found when nothing builds ([`FitSearch`]). `hint` as
-/// for [`fillet_max_why`].
-pub fn chamfer_max_why(body: &Body, edges: &[Vec3], distance: f64, hint: Option<f64>) -> Result<FitSearch> {
+/// and `spent` as for [`fillet_max_why`].
+pub fn chamfer_max_why(body: &Body, edges: &[Vec3], distance: f64, hint: Option<f64>, spent: std::time::Duration) -> Result<FitSearch> {
+    let Some(left) = why_budget_left(spent) else { return Ok(NOT_SEARCHED) };
     let _span = solidcraft_profile::span("kernel", "chamfer_max");
-    largest_that_fits(distance, hint, Some(WHY_BUDGET), |d| chamfer(body, edges, d))
+    largest_that_fits(distance, hint, Some(left), |d| chamfer(body, edges, d))
 }
 
 /// The largest size in mm a refusal names ([`largest_fit_note`]): 3 for "...; the largest radius
@@ -2503,6 +2524,19 @@ mod tests {
         assert!(cut.stopped && cut.tried == 1 && cut.found.is_none());
         let whole = largest_that_fits(1.0, None, None, slow).unwrap();
         assert!(!whole.stopped && whole.found.map(|f| f.0) == Some(0.4));
+    }
+
+    /// A refusal that itself took the search's time is not searched: every candidate would take
+    /// as long. A quick one leaves the rest of the time.
+    #[test]
+    fn a_slow_refusal_is_not_searched() {
+        let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        let p = [Vec3::new(0.5, 0.0, 0.0)];
+        let none = fillet_max_why(&body, &p, 5.0, FilletTurn::default(), None, WHY_BUDGET).unwrap();
+        assert!(none.stopped && none.tried == 0 && none.found.is_none());
+        let none = chamfer_max_why(&body, &p, 5.0, None, WHY_BUDGET * 2).unwrap();
+        assert!(none.stopped && none.tried == 0 && none.found.is_none());
+        assert_eq!(why_budget_left(std::time::Duration::from_secs(3)), Some(std::time::Duration::from_secs(5)));
     }
 
     /// A search that builds a candidate reports it and no refusal.
