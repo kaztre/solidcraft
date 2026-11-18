@@ -787,7 +787,10 @@ mod tests {
             assert_eq!(check.is_some(), read_back_fails_check, "{width} × {thickness}: {check:?}");
             match check {
                 Some(check) => {
-                    assert_eq!(imported.warnings, [format!("solid 'Body1': needs repair before it can be modelled: SMLib's check fails it: {check}")])
+                    assert_eq!(
+                        imported.warnings,
+                        [format!("solid 'Body1' of 'Part': needs repair before it can be modelled: SMLib's check fails it: {check}")]
+                    )
                 }
                 None => assert!(imported.warnings.is_empty(), "{:?}", imported.warnings),
             }

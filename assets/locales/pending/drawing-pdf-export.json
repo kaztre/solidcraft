@@ -2,5 +2,33 @@
   "en": {
     "drawing_export.no_sheet": "The drawing has no sheet to export.",
     "drawing_export.pick_format": "Export a drawing as .pdf, .svg or .png."
+  },
+  "de": {
+    "drawing_export.no_sheet": "Die Zeichnung hat kein Blatt zum Exportieren.",
+    "drawing_export.pick_format": "Eine Zeichnung als .pdf, .svg oder .png exportieren."
+  },
+  "ja": {
+    "drawing_export.no_sheet": "図面にエクスポートするシートがありません。",
+    "drawing_export.pick_format": "図面は .pdf、.svg、.png でエクスポートします。"
+  },
+  "zh": {
+    "drawing_export.no_sheet": "该工程图没有可导出的图纸。",
+    "drawing_export.pick_format": "将工程图导出为 .pdf、.svg 或 .png。"
+  },
+  "ko": {
+    "drawing_export.no_sheet": "도면에 내보낼 시트가 없습니다.",
+    "drawing_export.pick_format": "도면을 .pdf, .svg 또는 .png로 내보내세요."
+  },
+  "ar": {
+    "drawing_export.no_sheet": "لا تحتوي الرسمة على ورقة للتصدير.",
+    "drawing_export.pick_format": "صدّر الرسمة بصيغة .pdf أو .svg أو .png."
+  },
+  "he": {
+    "drawing_export.no_sheet": "בשרטוט אין גיליון לייצוא.",
+    "drawing_export.pick_format": "ייצא שרטוט כקובץ pdf‏, svg או png."
+  },
+  "vi": {
+    "drawing_export.no_sheet": "Bản vẽ không có trang nào để xuất.",
+    "drawing_export.pick_format": "Xuất bản vẽ dưới dạng .pdf, .svg hoặc .png."
   }
 }

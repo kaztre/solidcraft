@@ -2015,14 +2015,13 @@ mod tests {
         assert_eq!(s.model.take_import_notices(), [id], "a window is told once");
         s.model.settle_import_checks();
         assert_eq!(s.model.take_import_notices(), Vec::<u64>::new());
-        // A box joined to it at its far corner: the default each_feature check refuses the result,
-        // and the message says the check fails the part as it was before the join.
-        let err = s
-            .execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "corner": [18, 28, 8], "operation": "join", "targets": ["Bloco"]}))
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("body `Bloco` (SMLib's check fails it as it was before this feature): "), "{err}");
-        assert!(err.contains("SMLib's check refuses the result"), "{err}");
+        // A box joined to it at its far corner: the check refuses the result, but the part failed
+        // it before the join and fails no more tests after it, so it is kept, with a warning naming
+        // the part (fork, kaztre#15: refusing left such a part impossible to change).
+        let joined =
+            run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [18, 28, 8], "operation": "join", "targets": ["Bloco"]}));
+        let warning = joined["warning"].as_str().unwrap_or_default();
+        assert!(warning.contains("body `Bloco` already failed the modelling kernel's check before this feature"), "{joined}");
         // Repair: refused with the check's failures, nothing added.
         let n = s.doc.features.len();
         let err = s.execute("body.repair", &json!({"body": "Bloco"})).unwrap_err().to_string();

@@ -1536,7 +1536,8 @@ fn a_placement_that_scales_a_part_is_checked_as_placed() {
         let m = measure(b).unwrap();
         m.bbox.max.z - m.bbox.min.z
     };
-    let label = "solid 'Bloco' as its placement scales, shears or mirrors it: needs repair before it can be modelled: SMLib's check fails it: ";
+    let label =
+        "solid 'Bloco' of 'Block' as its placement scales, shears or mirrors it: needs repair before it can be modelled: SMLib's check fails it: ";
     let imp = step_import(&with_scaled_instance(&lifted_bezier_block(2e-4), (1.0, 1.0, 100.0))).unwrap();
     assert_eq!(imp.bodies.len(), 2, "{:?}", imp.warnings);
     let (part, stretched) = (&imp.bodies[0].body, &imp.bodies[1].body);
@@ -1561,12 +1562,16 @@ fn a_placement_that_scales_a_part_is_checked_as_placed() {
     assert_eq!(rigid.bodies.len(), 2, "{:?}", rigid.warnings);
     let own = crate::validation::failing_check(&rigid.bodies[0].body).unwrap().expect("the lifted block fails the check");
     assert_eq!(crate::validation::failing_check(&rigid.bodies[1].body).unwrap().as_ref(), Some(&own), "moved, it fails the same tests");
-    assert_eq!(checked(&rigid.warnings), [format!("solid 'Bloco': needs repair before it can be modelled: SMLib's check fails it: {own} (×2)")]);
+    assert_eq!(
+        checked(&rigid.warnings),
+        [format!("solid 'Bloco' of 'Block': needs repair before it can be modelled: SMLib's check fails it: {own} (×2)")]
+    );
     let scaled = step_import(&with_scaled_instance(&fails, (10.0, 10.0, 10.0))).unwrap();
     assert_eq!(scaled.bodies.len(), 2, "{:?}", scaled.warnings);
     assert!((z_extent(&scaled.bodies[1].body) - 100.0).abs() < 1e-9);
     let large = crate::validation::failing_check(&scaled.bodies[1].body).unwrap().expect("scaled, it still fails");
-    let mut want = vec![format!("solid 'Bloco': needs repair before it can be modelled: SMLib's check fails it: {own}"), format!("{label}{large}")];
+    let mut want =
+        vec![format!("solid 'Bloco' of 'Block': needs repair before it can be modelled: SMLib's check fails it: {own}"), format!("{label}{large}")];
     want.sort();
     assert_eq!(checked(&scaled.warnings), want);
 }
@@ -4977,7 +4982,7 @@ fn a_solid_with_edges_shorter_than_the_stated_tolerance_is_read_at_its_own() {
     let (text, coarse) = stating_coarse(0.004);
     let imp = step_import(&coarse).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
-    let note = "solid 'Body1': the file states a tolerance of 0.01 mm, but the part has edges as short as 4.000e-3 mm: read at 1.000e-3 mm";
+    let note = "solid 'Body1' of 'Part': the file states a tolerance of 0.01 mm, but the part has edges as short as 4.000e-3 mm: read at 1.000e-3 mm";
     assert_eq!(imp.warnings, [note]);
     let body = &imp.bodies[0].body;
     assert_eq!(body.record().tolerance, 1e-3);
