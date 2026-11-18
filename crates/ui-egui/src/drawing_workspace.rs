@@ -106,7 +106,7 @@ pub(crate) fn placing_note(app: &SolveApp) -> bool {
 }
 
 pub fn can_open_options(id: &str) -> bool {
-    Tool::for_command(id).is_some() || matches!(id, "drawing.sheet.add" | "drawing.sheet.set")
+    Tool::for_command(id).is_some() || matches!(id, "drawing.sheet.add" | "drawing.sheet.set" | "drawing.export")
 }
 
 /// Dismiss the current Drawing inspector without touching source or drawing data.
@@ -137,6 +137,7 @@ pub fn start(app: &mut SolveApp, id: &str) -> bool {
     match id {
         "drawing.sheet.add" => open_add_sheet(app),
         "drawing.sheet.set" => app.drawing_workspace.settings_open = true,
+        "drawing.export" => export_drawing(app),
         "drawing.view.base" | "drawing.view.base.planned" => {
             app.drawing_workspace.placement = placement::Placement::new(app);
             app.drawing_workspace.options = Some(Tool::Base);
@@ -144,6 +145,42 @@ pub fn start(app: &mut SolveApp, id: &str) -> bool {
         _ => app.drawing_workspace.options = Tool::for_command(id),
     }
     true
+}
+
+/// Export Drawing (fork): asks where to write the open drawing, and writes it beside the window
+/// ([`crate::file_load`]): a `.pdf` of every sheet, a page each, or the sheet shown as `.svg` or
+/// `.png`, by the extension chosen.
+fn export_drawing(app: &mut SolveApp) {
+    let Ok(drawing) = app.session.drawing("drawing.export") else { return };
+    let base = if drawing.name.trim().is_empty() { app.session.doc.name.clone() } else { drawing.name.clone() };
+    let sheet = crate::drawing_sheet_page::active_sheet(app);
+    app.pick_save(&format!("{base}.pdf"), &["pdf", "svg", "png"], move |app, path| {
+        let Some(path) = path else { return };
+        if let Err(why) = export_drawing_to(app, &path, sheet) {
+            app.set_status(why, true);
+        }
+    });
+}
+
+/// [`export_drawing`]'s export once the file is chosen: its format from its extension.
+fn export_drawing_to(app: &mut SolveApp, path: &str, sheet: Option<u64>) -> Result<(), String> {
+    let format = std::path::Path::new(path).extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+    let mut options = serde_json::Map::new();
+    match format.as_str() {
+        "pdf" => {
+            options.insert("all_sheets".into(), serde_json::json!(true));
+        }
+        "svg" | "png" => {
+            let sheet = sheet.ok_or_else(|| solidcraft_ui_text::tr_label("drawing_export.no_sheet").to_string())?;
+            options.insert("sheet".into(), serde_json::json!(solidcraft_engine::doc::ids::encode(sheet)));
+        }
+        _ => return Err(solidcraft_ui_text::tr_label("drawing_export.pick_format").to_string()),
+    }
+    options.insert("format".into(), serde_json::json!(format));
+    options.insert("path".into(), serde_json::json!(path));
+    let mut request = crate::file_load::Request::new(path, crate::file_load::Kind::ExportSheet);
+    request.options = options;
+    crate::file_load::begin_request(app, request)
 }
 
 pub(crate) fn start_projected(app: &mut SolveApp, parent: u64) -> bool {

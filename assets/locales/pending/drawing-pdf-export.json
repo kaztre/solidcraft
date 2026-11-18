@@ -1,0 +1,6 @@
+{
+  "en": {
+    "drawing_export.no_sheet": "The drawing has no sheet to export.",
+    "drawing_export.pick_format": "Export a drawing as .pdf, .svg or .png."
+  }
+}

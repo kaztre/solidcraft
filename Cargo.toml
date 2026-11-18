@@ -140,6 +140,9 @@ png = "0.18.1"
 weezl = "0.1.12"
 # sheet PDFs (MIT OR Apache-2.0, pure Rust; brings ryu, Apache-2.0 OR BSL-1.0)
 pdf-writer = "0.15"
+# subsets of the fonts a sheet PDF embeds (MIT OR Apache-2.0, pure Rust, no unsafe; brings
+# rustc-hash, Apache-2.0 OR MIT; without variable-font instancing)
+subsetter = { version = "0.2.6", default-features = false }
 # rasterises the UI icon SVGs (BSD-3-Clause, pure Rust, builds for wasm)
 tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
 # build scripts: reads the icon palette (MIT OR Apache-2.0)

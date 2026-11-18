@@ -309,7 +309,11 @@ fn what_it_cant_write_is_refused() {
     for (p, why) in [
         (json!({"sheet": id, "format": "dxf"}), "not supported yet: DXF"),
         (json!({"sheet": id, "format": "dxf", "path": folder.path("sheet.dxf")}), "not supported yet: DXF"),
-        (json!({"sheet": id, "format": "pdf"}), "format"),
+        (json!({"sheet": id, "format": "pdf", "paper": "blueprint"}), "a PDF is on white paper"),
+        (json!({"sheet": id, "format": "pdf", "all_sheets": true}), "not both"),
+        (json!({"all_sheets": true}), "`all_sheets` is for pdf only"),
+        (json!({"sheet": id, "format": "pdf", "path": folder.path("sheet.svg")}), "path must be a .pdf file"),
+        (json!({"format": "pdf"}), "`sheet` is required unless `all_sheets`"),
         (json!({"sheet": id, "path": folder.path("sheet.png")}), "path must be a .svg file"),
         (json!({"sheet": id, "format": "png", "path": folder.path("sheet.svg")}), "path must be a .png file"),
         (json!({"sheet": id, "format": "png", "path": folder.path("sheet")}), "path must be a .png file"),
@@ -560,4 +564,30 @@ fn the_milestone_plate_exports_the_same_after_it_is_saved_and_opened() {
         let read = run(&mut opened, "drawing.dimension.inspect", json!({"dimension": dimension}));
         assert_eq!((&read["value"], &read["text"], &read["status"]), (&value, &text, &json!("ok")), "{read}");
     }
+}
+
+/// A sheet exports as a PDF (fork, #4890 W22): the page its size, its title block's text real
+/// text a reader finds, printed at its size; every sheet goes in as a page each, in order. Nothing
+/// changes in the design.
+#[test]
+fn a_drawing_exports_as_a_pdf_of_its_sheets() {
+    let (mut s, sheet, _) = front_and_top();
+    let doc = s.doc.clone();
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet), "format": "pdf"}));
+    let schema = output_schema_for::<ExportResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    assert_eq!((&reply["format"], reply.get("svg"), reply.get("sheets")), (&json!("pdf"), None, None), "{reply}");
+    let pdf = base64_decode(reply["data"].as_str().unwrap()).unwrap();
+    assert!(pdf.starts_with(b"%PDF-") && reply["bytes"].as_u64() == Some(pdf.len() as u64));
+    let file = String::from_utf8_lossy(&pdf);
+    assert!(file.contains("/PrintScaling /None") && file.contains("/Count 1"), "one page, printed at its size");
+    let added = run(&mut s, "drawing.sheet.add", json!({"name": "Second"}));
+    let folder = Folder::new("drawing-export-pdf");
+    let path = folder.path("drawing.pdf");
+    let all = run(&mut s, CMD, json!({"all_sheets": true, "format": "pdf", "path": path}));
+    assert_eq!(all["sheets"], json!([ids::encode(sheet), added["sheet"].clone()]), "{all}");
+    let written = std::fs::read(&path).unwrap();
+    assert_eq!(all["bytes"].as_u64(), Some(written.len() as u64));
+    assert!(String::from_utf8_lossy(&written).contains("/Count 2"), "two pages");
+    assert_eq!(s.doc.features.len(), doc.features.len());
 }

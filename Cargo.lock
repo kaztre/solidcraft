@@ -6256,6 +6256,7 @@ dependencies = [
  "solidcraft-profile",
  "solidcraft-sketch",
  "solidcraft-testkit",
+ "subsetter",
  "tempfile",
  "thiserror 2.0.21",
  "tiny-skia",
@@ -6639,6 +6640,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "subsetter"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38803281d1c23166c5ebcb455439a5d2afe711cc909cf88af72448c297756ad6"
+dependencies = [
+ "rustc-hash 2.1.3",
 ]
 
 [[package]]

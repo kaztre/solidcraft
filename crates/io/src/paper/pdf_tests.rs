@@ -71,7 +71,7 @@ fn bezier([p0, p1, p2, p3]: [Vec2; 4], t: f64) -> Vec2 {
     p0 * (s * s * s) + p1 * (3.0 * s * s * t) + p2 * (3.0 * s * t * t) + p3 * (t * t * t)
 }
 
-const NONE: PdfOptions = PdfOptions { layers: true, title: None, output_time: None };
+const NONE: PdfOptions = PdfOptions { layers: true, title: None, output_time: None, actual_size: false };
 
 /// An A3 sheet's page is A3 in points, and the PDF says who made it.
 #[test]
@@ -102,12 +102,12 @@ fn the_same_scene_gives_the_same_bytes_and_dates_come_only_from_output_time() {
     let sheet = scene(p(210.0, 297.0), vec![stroke(vec![Seg2::Line { a: p(10.0, 20.0), b: p(60.0, 20.0) }], false, 0.5, None)]);
     assert_eq!(pdf(&sheet, &NONE), pdf(&sheet, &NONE));
     assert!(!text(&pdf(&sheet, &NONE)).contains("Date"));
-    let leap_day = PdfOptions { layers: true, title: Some("Sheet 1".into()), output_time: Some(951_782_400) };
+    let leap_day = PdfOptions { layers: true, title: Some("Sheet 1".into()), output_time: Some(951_782_400), actual_size: false };
     let file = text(&pdf(&sheet, &leap_day));
     assert!(file.contains("/CreationDate (D:20000229000000Z)") && file.contains("/ModDate (D:20000229000000Z)"), "{file}");
     assert!(file.contains("/Title (Sheet 1)"), "{file}");
     assert_eq!(pdf(&sheet, &leap_day), pdf(&sheet, &leap_day));
-    let last = PdfOptions { layers: true, title: Some(String::new()), output_time: Some(MAX_OUTPUT_TIME) };
+    let last = PdfOptions { layers: true, title: Some(String::new()), output_time: Some(MAX_OUTPUT_TIME), actual_size: false };
     let file = text(&pdf(&sheet, &last));
     assert!(file.contains("(D:99991231235959Z)") && !file.contains("/Title"), "{file}");
 }
@@ -202,14 +202,15 @@ fn check_number_grid(content: &str) -> std::result::Result<(), String> {
 fn every_cross_reference_points_at_its_object() {
     let sheet = scene(p(420.0, 297.0), vec![stroke(Loop2::circle(p(100.0, 100.0), 40.0).segs, true, 0.7, None)]);
     for title in ["ASCII", "\u{00c7}", "\u{65e5}\u{672c}\u{1f642}", "(sheet 1) \\ title"] {
-        let bytes = pdf(&sheet, &PdfOptions { layers: true, title: Some(title.into()), output_time: Some(0) });
+        let bytes = pdf(&sheet, &PdfOptions { layers: true, title: Some(title.into()), output_time: Some(0), actual_size: false });
         assert!(check_xref(&bytes).is_ok(), "{title:?}: {:?}", check_xref(&bytes));
     }
 }
 
 #[test]
 fn the_byte_offset_oracle_refuses_shifted_or_corrupted_references() {
-    let bytes = pdf(&scene(p(420.0, 297.0), vec![]), &PdfOptions { layers: true, title: Some("\u{00c7}".into()), output_time: None });
+    let bytes =
+        pdf(&scene(p(420.0, 297.0), vec![]), &PdfOptions { layers: true, title: Some("\u{00c7}".into()), output_time: None, actual_size: false });
     let start = check_xref(&bytes).unwrap();
     let mut shifted = bytes.clone();
     shifted.insert(9, b' ');
@@ -368,10 +369,10 @@ fn what_cannot_be_written_is_refused() {
     assert!(e.to_string().contains("at least 3 pt"), "{e}");
     let sheet = scene(p(210.0, 297.0), vec![]);
     let prepared = sheet.prepare().unwrap();
-    assert!(paper_pdf(&prepared, &PdfOptions { layers: true, title: Some("x".repeat(1000)), output_time: None }).is_ok());
-    let e = paper_pdf(&prepared, &PdfOptions { layers: true, title: Some("x".repeat(1001)), output_time: None }).unwrap_err();
+    assert!(paper_pdf(&prepared, &PdfOptions { layers: true, title: Some("x".repeat(1000)), output_time: None, actual_size: false }).is_ok());
+    let e = paper_pdf(&prepared, &PdfOptions { layers: true, title: Some("x".repeat(1001)), output_time: None, actual_size: false }).unwrap_err();
     assert!(e.to_string().contains("1000 characters"), "{e}");
-    let e = paper_pdf(&prepared, &PdfOptions { layers: true, title: None, output_time: Some(MAX_OUTPUT_TIME + 1) }).unwrap_err();
+    let e = paper_pdf(&prepared, &PdfOptions { layers: true, title: None, output_time: Some(MAX_OUTPUT_TIME + 1), actual_size: false }).unwrap_err();
     assert!(e.to_string().contains("9999"), "{e}");
 }
 
@@ -728,7 +729,7 @@ fn flat_pdf_reproduces_the_original_p1_a3_sample_bytes() {
             },
         ],
     );
-    let options = PdfOptions { title: Some("A3 sample".into()), output_time: Some(1_800_000_000), layers: false };
+    let options = PdfOptions { title: Some("A3 sample".into()), output_time: Some(1_800_000_000), layers: false, actual_size: false };
     let bytes = pdf(&sheet, &options);
     // The Info dictionary names the build ("SolidCraft <version>"), so the pin is every byte before it:
     // the header, catalog, page tree, page and content stream. Taken at 0.19.0 as the whole file (1063
@@ -920,7 +921,7 @@ fn one_page_is_the_one_page_call_byte_for_byte() {
     let prepared = sheet.prepare().unwrap();
     for layers in [true, false] {
         for (title, output_time) in [(None, None), (Some("Bracket — sheet 1".to_string()), Some(1_761_800_000))] {
-            let options = PdfOptions { title, output_time, layers };
+            let options = PdfOptions { title, output_time, layers, actual_size: false };
             let one = paper_pdf(&prepared, &options).unwrap();
             let (bytes, reports) = paper_pdf_pages(std::slice::from_ref(&prepared), &options).unwrap();
             assert_eq!((&bytes, &reports[..]), (&one.0, std::slice::from_ref(&one.1)), "{options:?}");
@@ -1014,4 +1015,168 @@ fn a_page_lists_no_layer_for_a_kind_it_only_has_pictures_of() {
     // Objects: catalog, page tree, then each page and its content.
     assert!(objects[2].1.contains(&view) && objects[2].1.contains(&image), "{}", objects[2].1);
     assert!(objects[4].1.contains(&view) && !objects[4].1.contains(&image), "{}", objects[4].1);
+}
+
+// ---- text and pictures (P2, fork) -------------------------------------------------------------
+
+/// A sheet whose one note group holds `runs`, set in `fonts`.
+fn text_sheet(runs: Vec<solidcraft_geom::paper::text::TextRun>, fonts: Vec<solidcraft_geom::paper::text::Font>) -> Scene {
+    let items = runs.into_iter().map(Item::Text).collect();
+    Scene { fonts, ..Scene::new(p(210.0, 297.0), vec![Group { object: 7, kind: ObjectKind::Note, items }]) }
+}
+
+/// `text` laid out by sketch's paper rule in the built-in font, 5 mm capitals at (20, 250).
+fn laid_out(text: &str) -> Scene {
+    let style = solidcraft_sketch::TextStyle::default();
+    let (runs, fonts) = solidcraft_sketch::paper_text_in(&[], text, None, "", p(20.0, 250.0), 5.0, 0.0, &style).unwrap().unwrap();
+    text_sheet(runs, fonts)
+}
+
+/// Every stream of the file, inflated where it is deflated.
+fn streams(bytes: &[u8]) -> Vec<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(at) = bytes[from..].windows(7).position(|w| w == b"stream\n") {
+        let start = from + at + 7;
+        let Some(len) = bytes[start..].windows(10).position(|w| w == b"\nendstream") else { break };
+        let raw = &bytes[start..start + len];
+        let mut inflated = Vec::new();
+        if flate2::read::ZlibDecoder::new(raw).read_to_end(&mut inflated).is_ok() {
+            out.push(inflated);
+        } else {
+            out.push(raw.to_vec());
+        }
+        from = start + len;
+    }
+    out
+}
+
+/// Text is real text (#4890 P2): its font a subset embedded once, shown by glyph id, and read
+/// back as the text it is, by a PDF reader that knows nothing of the scene.
+#[test]
+fn text_is_set_in_its_embedded_font_and_reads_back_as_itself() {
+    let sheet = laid_out("Hello 12.5 \u{b1}0.1");
+    let bytes = pdf(&sheet, &NONE);
+    let file = text(&bytes);
+    for key in ["/Subtype /Type0", "/Encoding /Identity-H", "/Subtype /CIDFontType2", "/CIDToGIDMap /Identity", "/FontFile2", "/ToUnicode"] {
+        assert!(file.contains(key), "{key} in the file");
+    }
+    // A subset's name: six capitals, a plus, the face's PostScript name.
+    let name = file.split("/BaseFont /").nth(1).unwrap().split_whitespace().next().unwrap().to_string();
+    assert!(name.len() > 7 && name[..6].chars().all(|c| c.is_ascii_uppercase()) && &name[6..7] == "+", "{name}");
+    assert_eq!(file.matches("/Subtype /Type0").count(), 1, "one font, once");
+    let page = content(&bytes);
+    assert!(page.contains("/F0 1 Tf") && page.contains(" TJ") && page.contains("/ActualText <FEFF"), "{page}");
+    assert!(!page.contains(" f\n") && !page.contains("\nf\n"), "no glyph is filled as an outline: {page}");
+    let read = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    let words: String = read.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(words.contains("Hello 12.5 \u{b1}0.1"), "{read:?}");
+    // The embedded file is a subset: far smaller than the face.
+    let face = sheet.fonts[0].bytes.len();
+    let embedded = streams(&bytes).iter().map(Vec::len).max().unwrap();
+    assert!(embedded < face / 4, "{embedded} of {face} bytes");
+}
+
+/// The same text gives the same bytes: the subset's tag comes from its glyphs, not the clock.
+#[test]
+fn text_gives_the_same_bytes_each_time() {
+    let sheet = laid_out("Revision B");
+    assert_eq!(pdf(&sheet, &NONE), pdf(&sheet, &NONE));
+}
+
+/// A glyph lands where the scene put it: the pen, moved by the widths `W` gives and the `TJ`
+/// adjustments, reaches each glyph's place along the baseline.
+#[test]
+fn each_glyph_is_shown_at_its_place() {
+    let sheet = laid_out("AVAWAY 11");
+    let Item::Text(run) = sheet.groups[0].items[0].clone() else { panic!("the note's first item is its run") };
+    let font = &sheet.fonts[0];
+    let em = run.scale * f64::from(font.units_per_em);
+    let page = content(&bytes_of(&sheet));
+    let tj = page.split('[').nth(1).unwrap().split(']').next().unwrap().to_string();
+    // Walk the array: numbers move the pen back by thousandths of an em, glyphs place and advance.
+    let mut pen = 0.0;
+    let mut placed = Vec::new();
+    let mut rest = tj.as_str();
+    while !rest.is_empty() {
+        rest = rest.trim_start();
+        if let Some(after) = rest.strip_prefix('<') {
+            let (hex, tail) = after.split_once('>').unwrap();
+            let gid = u16::from_str_radix(hex, 16).unwrap();
+            placed.push(pen * em);
+            // CIDs are the subset's; the advance is the original glyph's, in the same order.
+            let original = run.glyphs[placed.len() - 1].id;
+            pen += f64::from(font.glyphs[&original].advance) / f64::from(font.units_per_em);
+            let _ = gid;
+            rest = tail;
+        } else {
+            let end = rest.find(|c: char| c == '<' || c.is_whitespace()).unwrap_or(rest.len());
+            pen -= rest[..end].parse::<f64>().unwrap() / 1000.0;
+            rest = &rest[end..];
+        }
+    }
+    assert_eq!(placed.len(), run.glyphs.len());
+    for (at, g) in placed.iter().zip(&run.glyphs) {
+        assert!((at - g.x).abs() < 1e-3, "glyph at {at} mm, the scene's at {} mm", g.x);
+    }
+}
+
+fn bytes_of(sheet: &Scene) -> Vec<u8> {
+    pdf(sheet, &NONE)
+}
+
+/// A face whose licence keeps it out of files is drawn as its glyphs' outlines, with the run's
+/// text beside them; so is one the subsetter can't read. No font goes in the file.
+#[test]
+fn a_font_that_cant_be_embedded_is_filled_with_its_text_beside_it() {
+    for embed in [solidcraft_geom::paper::text::Embed::Outlines, solidcraft_geom::paper::text::Embed::Subset] {
+        let mut sheet = laid_out("Ab");
+        sheet.fonts[0].embed = embed;
+        if embed == solidcraft_geom::paper::text::Embed::Subset {
+            sheet.fonts[0].bytes = std::sync::Arc::from(vec![0u8; 64]);
+        }
+        let bytes = pdf(&sheet, &NONE);
+        let (file, page) = (text(&bytes), content(&bytes));
+        assert!(!file.contains("/Type0") && !file.contains("/Font "), "{embed:?}");
+        assert!(page.contains("/ActualText <FEFF00410062>") && page.contains("\nf\n"), "{embed:?}: {page}");
+    }
+}
+
+/// A page given its pictures' pixels draws each as an image on its pixel grid, with its alpha as
+/// a soft mask when it isn't opaque; without them it passes them over, as before.
+#[test]
+fn pictures_are_images_on_their_pixel_grid() {
+    use solidcraft_geom::Aabb2;
+    use solidcraft_geom::paper::Picture;
+    use solidcraft_geom::pixel_grid::{GridWindow, PixelGrid};
+    struct Grey(u8);
+    impl Pictures for Grey {
+        fn rows(&self, _: u64, _: &PixelGrid, w: GridWindow) -> std::result::Result<Vec<u8>, String> {
+            let n = ((w.x1 - w.x0) * (w.y1 - w.y0)) as usize;
+            Ok([128, 128, 128, self.0].repeat(n))
+        }
+    }
+    let picture = |opacity| Item::Picture(Picture { source: 3, rect: Aabb2 { min: p(20.0, 20.0), max: p(45.4, 45.4) }, opacity });
+    for (alpha, opacity, masked) in [(255u8, 1.0, false), (255, 0.5, true), (10, 1.0, true)] {
+        let sheet = scene(p(210.0, 297.0), vec![picture(opacity)]);
+        let prepared = sheet.prepare().unwrap();
+        let provider = Grey(alpha);
+        let pages = [PdfPage { scene: &prepared, pictures: Some((&provider, 100.0)) }];
+        let (bytes, _) = paper_pdf_document(&pages, &NONE).unwrap();
+        let file = text(&bytes);
+        assert!(file.contains("/Subtype /Image") && file.contains("/Width 100") && file.contains("/Height 100"), "{file}");
+        assert_eq!(file.contains("/SMask"), masked, "alpha {alpha}, opacity {opacity}");
+        let page = content(&bytes);
+        assert!(page.contains("25.4 0 0 25.4 20 20 cm\n/Im0 Do"), "{page}");
+    }
+    let sheet = scene(p(210.0, 297.0), vec![picture(1.0)]);
+    assert!(!text(&pdf(&sheet, &NONE)).contains("/Image"), "no pixels, no picture");
+}
+
+/// Actual size asks the viewer to print the page at its size; without it the file says nothing.
+#[test]
+fn actual_size_asks_to_print_at_the_pages_size() {
+    let sheet = scene(p(210.0, 297.0), vec![stroke(vec![Seg2::Line { a: p(10.0, 10.0), b: p(100.0, 10.0) }], false, 0.35, None)]);
+    assert!(text(&pdf(&sheet, &PdfOptions { actual_size: true, ..NONE })).contains("/PrintScaling /None"));
+    assert!(!text(&pdf(&sheet, &NONE)).contains("PrintScaling"));
 }

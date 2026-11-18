@@ -254,7 +254,7 @@ fn encoder<W: Write>(out: W, pixels: [u32; 2], format: (png::ColorType, png::Bit
 
 /// Picture `source`'s pixels in `window` of `grid`, from `pictures`, refused unless they are
 /// exactly the size asked for.
-fn ask(pictures: &dyn Pictures, source: u64, grid: &PixelGrid, window: GridWindow) -> Result<Vec<u8>> {
+pub(super) fn ask(pictures: &dyn Pictures, source: u64, grid: &PixelGrid, window: GridWindow) -> Result<Vec<u8>> {
     let rgba = pictures.rows(source, grid, window).map_err(|e| IoError::Invalid(format!("picture {source}: {e}")))?;
     let expected = window.x1.saturating_sub(window.x0) as usize * window.y1.saturating_sub(window.y0) as usize * 4;
     if rgba.len() != expected {

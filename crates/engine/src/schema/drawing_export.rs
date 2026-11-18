@@ -6,16 +6,21 @@ use serde::{Deserialize, Serialize};
 use super::drawing_scene::{
     SheetSceneBalloon, SheetSceneDimension, SheetSceneFill, SheetSceneNote, SheetSceneSketch, SheetSceneTable, SheetSceneView,
 };
-use super::drawing_sheet::sheet_ref;
+use super::drawing_sheet::some_sheet_ref;
 
-/// Write one sheet of the open drawing to a file, or return it.
+/// Write one sheet of the open drawing, or every sheet as the pages of one PDF, to a file, or
+/// return it.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(deny_unknown_fields)]
 pub struct ExportParams {
-    /// The sheet, by id or name.
-    #[serde(deserialize_with = "sheet_ref")]
-    pub sheet: String,
+    /// The sheet, by id or name: required unless `all_sheets`.
+    #[serde(default, deserialize_with = "some_sheet_ref", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String")]
+    pub sheet: Option<String>,
+    /// PDF only: every sheet of the drawing, in order, each a page of its own size.
+    #[serde(default)]
+    pub all_sheets: bool,
     /// The file format (svg when not given). DXF is not supported yet.
     #[serde(default)]
     pub format: ExportFormat,
@@ -46,6 +51,9 @@ pub enum ExportFormat {
     Svg,
     Png,
     Dxf,
+    /// A vector PDF: lines, text that can be searched and copied (its fonts embedded), and
+    /// pictures, at the sheet's size and printed at it.
+    Pdf,
 }
 
 impl ExportFormat {
@@ -55,6 +63,7 @@ impl ExportFormat {
             ExportFormat::Svg => "svg",
             ExportFormat::Png => "png",
             ExportFormat::Dxf => "dxf",
+            ExportFormat::Pdf => "pdf",
         }
     }
 }
@@ -123,7 +132,11 @@ pub struct ExportReport {
 /// What `drawing.export` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ExportResult {
+    /// The sheet written; with `all_sheets`, the first.
     pub sheet: String,
+    /// With `all_sheets`: every sheet written, a page each, in order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sheets: Vec<String>,
     pub format: ExportFormat,
     /// The document's size in bytes.
     pub bytes: usize,
@@ -133,7 +146,7 @@ pub struct ExportResult {
     /// The SVG's text when no path was given.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub svg: Option<String>,
-    /// The document as base64 when no path was given and it is binary (PNG).
+    /// The document as base64 when no path was given and it is binary (PNG, PDF).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<String>,
     pub report: ExportReport,

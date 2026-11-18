@@ -15,7 +15,7 @@ pub(super) fn sheet_ref<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Er
 }
 
 /// [`sheet_ref`], for a key that may be absent (`null` is refused).
-fn some_sheet_ref<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+pub(super) fn some_sheet_ref<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     sheet_ref(d).map(Some)
 }
 

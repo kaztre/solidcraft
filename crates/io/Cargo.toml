@@ -60,6 +60,7 @@ gerber_parser = { version = "0.5.0", default-features = false }
 cavalier_contours = { version = "0.9.0", default-features = false }
 # Sheet PDFs (src/paper/pdf.rs; flate2 above deflates their content).
 pdf-writer = { workspace = true }
+subsetter = { workspace = true }
 
 # The model cache's key (build.rs).
 [build-dependencies]
