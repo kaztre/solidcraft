@@ -151,7 +151,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "body?, path?, curves?: exact|arcs (default exact: an ellipse as ELLIPSE, splines, text outlines and other Béziers as SPLINE; arcs: tangent arcs and lines within 0.001 mm, for machines that read only those), \
              text?: cut|etch (default cut: letters that text cut through the sheet are cut contours on layer TEXT; etch: single contours on layer ETCH and the sheet keeps its material there; text machined to a depth is always on ETCH), \
-             bend_notes?: bool (default false: a note beside each bend line on layer BEND_NOTES, `B1 UP 90%%d R1`, its angle the included angle \
+             bend_notes?: bool (default false: a note beside each bend line on layer BEND_NOTES, `B1 UP 90° R1`, its angle the included angle \
               when the body's rule has angle_display: included), note_height?: mm (default 3), \
              bend_lines?: bool (default true; false leaves BEND_UP and BEND_DOWN out, for a cutter that would cut them), \
              layers?: roles|single (default roles, the layers below; single: every entity on layer 0), \
@@ -817,8 +817,13 @@ fn no_sheet_body(cmd: &str) -> EngineError {
 }
 
 fn sheet_of(s: &Session, p: &Value, cmd: &str) -> Result<SheetBody> {
+    sheet_named(s, str_(p, "body"), cmd)
+}
+
+/// The sheet-metal body `body`, else the last one.
+fn sheet_named(s: &Session, body: Option<&str>, cmd: &str) -> Result<SheetBody> {
     let st = s.model.state();
-    match str_(p, "body") {
+    match body {
         Some(b) => st.sheets.iter().find(|x| x.body == b).cloned().ok_or_else(|| bad(cmd, format!("`{b}` is not a sheet metal body"))),
         None => st.sheets.last().cloned().ok_or_else(|| no_sheet_body(cmd)),
     }
@@ -973,7 +978,13 @@ fn flat_json(sh: &SheetBody) -> Result<Value> {
 }
 
 fn flat_pattern(s: &mut Session, p: &Value) -> Result<Value> {
-    let sh = sheet_of(s, p, "sheet.flat_pattern")?;
+    flat_reply(s, str_(p, "body"), "sheet.flat_pattern")
+}
+
+/// `sheet.flat_pattern`'s reply for the sheet-metal body `body` (else the last one): what the
+/// command reports and a flat pattern view draws, one reader for both.
+pub(crate) fn flat_reply(s: &Session, body: Option<&str>, cmd: &str) -> Result<Value> {
+    let sh = sheet_named(s, body, cmd)?;
     sh.flat_matches_body()?;
     flat_json(&sh)
 }
@@ -1014,18 +1025,26 @@ pub struct DxfOptions {
 /// The layer of a role: its AutoCAD colour index (1 red, 2 yellow, 3 green, 4 cyan, 5 blue,
 /// 6 magenta, 7 white or black, 8 grey) and, for the bend lines, a dashed line. The pocket layers
 /// and PERFORATION are green.
-fn dxf_layer(name: &str) -> solidcraft_io::DxfLayer {
-    use solidcraft_io::DxfLayer;
-    match name {
-        "OUTLINE" => DxfLayer::new(name, 7),
-        "CUT" => DxfLayer::new(name, 4),
-        "TEXT" => DxfLayer::new(name, 2),
-        "ETCH" => DxfLayer::new(name, 6),
-        "BEND_UP" => DxfLayer::new(name, 1).dashed(),
-        "BEND_DOWN" => DxfLayer::new(name, 5).dashed(),
-        "BEND_NOTES" => DxfLayer::new(name, 8),
-        _ => DxfLayer::new(name, 3),
+fn dxf_layer(
+    file: &mut solidcraft_io::DxfFile<solidcraft_io::DxfShape>,
+    name: &str,
+    one_layer: bool,
+) -> solidcraft_io::Result<solidcraft_io::DxfLayerId> {
+    use solidcraft_io::DxfLinetype;
+    if one_layer {
+        return Ok(file.default_layer());
     }
+    let (color, linetype) = match name {
+        "OUTLINE" => (7, DxfLinetype::Continuous),
+        "CUT" => (4, DxfLinetype::Continuous),
+        "TEXT" => (2, DxfLinetype::Continuous),
+        "ETCH" => (6, DxfLinetype::Continuous),
+        "BEND_UP" => (1, DxfLinetype::Dashed),
+        "BEND_DOWN" => (5, DxfLinetype::Dashed),
+        "BEND_NOTES" => (8, DxfLinetype::Continuous),
+        _ => (3, DxfLinetype::Continuous),
+    };
+    file.declare_layer(name, color, linetype, None)
 }
 
 /// A number in a bend note: at most three decimals, none when they are zeros (`90`, `2.5`).
@@ -1035,9 +1054,9 @@ fn compact(v: f64) -> String {
     if t.is_empty() || t == "-0" { "0".into() } else { t.into() }
 }
 
-/// The note beside a bend line, `B1 UP 90%%d R2.5` (number, direction, angle as `display` reads
+/// The note beside a bend line, `B1 UP 90° R2.5` (number, direction, angle as `display` reads
 /// it, inner radius): as high as `height`, centred half a height beside the middle of the line,
-/// parallel to it and readable from below or from the right. (`%%d` is AutoCAD's degree sign.)
+/// parallel to it and readable from below or from the right.
 fn bend_note(b: &solidcraft_doc::sheet::BendInfo, height: f64, display: sheet::AngleDisplay) -> solidcraft_io::DxfShape {
     let along = (b.end - b.start).normalized().unwrap_or(Vec2::X);
     let mut angle = along.angle().to_degrees();
@@ -1051,7 +1070,7 @@ fn bend_note(b: &solidcraft_doc::sheet::BendInfo, height: f64, display: sheet::A
         at: (b.start + b.end) * 0.5 + beside * (height * 0.5),
         height,
         angle_deg: angle,
-        text: format!("B{} {} {}%%d R{}", b.index, if b.up { "UP" } else { "DOWN" }, compact(display.of(b.angle_deg)), compact(b.radius)),
+        text: format!("B{} {} {}° R{}", b.index, if b.up { "UP" } else { "DOWN" }, compact(display.of(b.angle_deg)), compact(b.radius)),
     }
 }
 
@@ -1061,7 +1080,7 @@ fn bend_note(b: &solidcraft_doc::sheet::BendInfo, height: f64, display: sheet::A
 /// per pocket depth and PERFORATION. Inner contours are written before the outline, so a program
 /// that follows the file's order cuts inside-out. Free-form curves as `o.curves` says.
 pub fn flat_dxf(sh: &SheetBody, o: &DxfOptions) -> Result<String> {
-    use solidcraft_io::{DxfEntity, DxfPathStyle, DxfShape};
+    use solidcraft_io::{DxfFile, DxfPathStyle, DxfShape};
     let regions = sh.flat_regions()?;
     let pockets = sh.machining()?;
     let letters = sh.letters();
@@ -1129,7 +1148,15 @@ pub fn flat_dxf(sh: &SheetBody, o: &DxfOptions) -> Result<String> {
         }
     }
     loops.sort_by_key(|(pass, ..)| *pass);
-    let mut entities = Vec::new();
+    let bends = sh.bends();
+    let mut file = DxfFile::for_flat_pattern_export(loops.len(), bends.len(), perforation.len())?;
+    if !o.one_layer {
+        // These four baseline roles exist even without matching geometry. The
+        // compatibility writer keeps their historical sorted table order.
+        for name in ["BEND_DOWN", "BEND_UP", "CUT", "OUTLINE"] {
+            dxf_layer(&mut file, name, false)?;
+        }
+    }
     for (i, (_, h, layer)) in loops.into_iter().enumerate() {
         let style = match o.curves {
             DxfCurves::Exact => DxfPathStyle::Exact,
@@ -1137,31 +1164,30 @@ pub fn flat_dxf(sh: &SheetBody, o: &DxfOptions) -> Result<String> {
         };
         let shapes = flat_loop_shapes(h, style)
             .map_err(|e| EngineError::Other(format!("flat-pattern body {:?}, layer {layer:?}, contour {}: {e}", sh.body, i + 1)))?;
-        entities.extend(shapes.into_iter().map(|shape| DxfEntity { layer: layer.clone(), shape }));
+        if !shapes.is_empty() {
+            let layer = dxf_layer(&mut file, &layer, o.one_layer)?;
+            for shape in shapes {
+                file.push(layer, shape, None)?;
+            }
+        }
     }
-    for b in sh.bends() {
+    for b in bends {
         if !o.no_bend_lines {
-            entities.push(DxfEntity { layer: if b.up { "BEND_UP" } else { "BEND_DOWN" }.into(), shape: DxfShape::Line(b.start, b.end) });
+            let layer = dxf_layer(&mut file, if b.up { "BEND_UP" } else { "BEND_DOWN" }, o.one_layer)?;
+            file.push(layer, DxfShape::Line(b.start, b.end), None)?;
         }
         if let Some(height) = o.bend_notes {
-            entities.push(DxfEntity { layer: "BEND_NOTES".into(), shape: bend_note(&b, height, sh.angle_display) });
+            let layer = dxf_layer(&mut file, "BEND_NOTES", o.one_layer)?;
+            file.push(layer, bend_note(&b, height, sh.angle_display), None)?;
         }
     }
-    for (c, r) in perforation {
-        entities.push(DxfEntity { layer: "PERFORATION".into(), shape: DxfShape::Circle { c, r } });
-    }
-    // One layer: every entity on layer 0, which every drawing has.
-    if o.one_layer {
-        for e in &mut entities {
-            e.layer = "0".into();
+    if !perforation.is_empty() {
+        let layer = dxf_layer(&mut file, "PERFORATION", o.one_layer)?;
+        for (c, r) in perforation {
+            file.push(layer, DxfShape::Circle { c, r }, None)?;
         }
-        return Ok(solidcraft_io::write_dxf_drawing(&[], &entities)?);
     }
-    // The four layers of every flat pattern, and those the rest is on.
-    let mut names: std::collections::BTreeSet<String> = ["OUTLINE", "CUT", "BEND_UP", "BEND_DOWN"].map(String::from).into();
-    names.extend(entities.iter().map(|e| e.layer.clone()));
-    let layers: Vec<_> = names.iter().map(|name| dxf_layer(name)).collect();
-    Ok(solidcraft_io::write_dxf_drawing(&layers, &entities)?)
+    Ok(solidcraft_io::write_dxf_file(&file)?)
 }
 
 /// A DXF export's `curves`: exact or arcs, in any case.

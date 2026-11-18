@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 
 use super::{
     BugReportParams, CrashReport, CrashReportList, CrashReportParams, CrashReportsClearParams, CrashReportsCleared, CrashReportsParams,
-    CrashTestMode, CrashTestParams, ProfileParams, ValidationParams,
+    CrashTestMode, CrashTestParams, ProfileParams, ReportIssueParams, ReportIssueStatusParams, ValidationParams,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -17,6 +17,11 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ProfileParams>(), &["enabled", "reset", "top", "trace"]);
     assert_keys(input_schema_for::<ValidationParams>(), &["mode"]);
     assert_keys(input_schema_for::<BugReportParams>(), &["context", "dialog", "expected", "screenshot_png", "steps", "title", "what_happened"]);
+    assert_keys(
+        input_schema_for::<ReportIssueParams>(),
+        &["app", "crash", "description", "design", "log", "repro", "screenshot", "system", "title", "type"],
+    );
+    assert_keys(input_schema_for::<ReportIssueStatusParams>(), &["report"]);
 }
 
 #[test]
@@ -33,6 +38,8 @@ fn strict_keeps_todays_errors() {
         ("diagnostics.bug_report", json!({"title": 3})),
         ("diagnostics.bug_report", json!({"title": "x", "steps": ["a"]})),
         ("diagnostics.bug_report", json!({"title": "x", "screenshot_png": false})),
+        ("diagnostics.report_issue", json!({"title": ""})),
+        ("diagnostics.report_issue_status", json!({"report": "r-none"})),
     ]);
 }
 

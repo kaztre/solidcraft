@@ -17,6 +17,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
+use solidcore_record::brep::Brep as Record;
+use solidcraft_smlib::CheckLevel;
 
 use crate::body::Body;
 use crate::{KernelError, Result};
@@ -141,16 +143,19 @@ pub(crate) struct Unchecked {
     /// The step, as its own refusal names it (`SMLib fillet`).
     what: String,
     how: Checked,
-    result: std::sync::Mutex<Option<solidcraft_smlib::Brep>>,
+    /// The result, with the records of the bodies the step combined (to name one that already
+    /// fails the check): let go together once the check takes them.
+    result: std::sync::Mutex<Option<(solidcraft_smlib::Brep, Vec<Arc<Record>>)>>,
 }
 
 impl Unchecked {
-    pub(crate) fn new(record: &Arc<solidcore_record::brep::Brep>, what: &str, how: Checked, result: solidcraft_smlib::Brep) -> Unchecked {
-        Unchecked { record: Arc::downgrade(record), what: what.to_string(), how, result: std::sync::Mutex::new(Some(result)) }
+    pub(crate) fn new(record: &Arc<Record>, what: &str, how: Checked, result: solidcraft_smlib::Brep, operands: &[&Body]) -> Unchecked {
+        let operands = operands.iter().map(|b| b.record.arc().clone()).collect();
+        Unchecked { record: Arc::downgrade(record), what: what.to_string(), how, result: std::sync::Mutex::new(Some((result, operands))) }
     }
 
-    /// The step's result, taken (once), when this is `record`'s.
-    fn take(&self, record: &Arc<solidcore_record::brep::Brep>) -> Option<solidcraft_smlib::Brep> {
+    /// The step's result and its operands, taken (once), when this is `record`'s.
+    fn take(&self, record: &Arc<solidcore_record::brep::Brep>) -> Option<(solidcraft_smlib::Brep, Vec<Arc<Record>>)> {
         if !std::ptr::eq(self.record.as_ptr(), Arc::as_ptr(record)) {
             return None;
         }
@@ -160,17 +165,32 @@ impl Unchecked {
 
 /// SMLib's full check of `r` as a step takes it (`how`): the check's report.
 pub(crate) fn check_result(r: &solidcraft_smlib::Brep, how: Checked) -> std::result::Result<solidcraft_smlib::CheckReport, String> {
-    fn failed(what: &'static str) -> impl Fn(&dyn std::fmt::Display) -> String {
-        move |e| format!("{what}: {e}")
-    }
-    match how {
-        Checked::Combined if !r.is_manifold_solid().map_err(|e| failed("check")(&e))? => {
-            let record = r.to_native().map_err(|e| failed("export")(&e))?;
-            let split = solidcraft_smlib::Brep::from_record(&record, true).map_err(|e| failed("the separate solids")(&e))?;
-            split.check(solidcraft_smlib::CheckLevel::All).map_err(|e| failed("check")(&e))
-        }
-        _ => r.check(solidcraft_smlib::CheckLevel::All).map_err(|e| failed("check")(&e)),
-    }
+    let check = match separate(r, how)? {
+        Some(record) => solidcraft_smlib::Brep::from_record(&record, true).map_err(|e| format!("the separate solids: {e}"))?.check(CheckLevel::All),
+        None => r.check(CheckLevel::All),
+    };
+    check.map_err(|e| format!("check: {e}"))
+}
+
+/// The record of the separate solids a boolean's result `r` exports to where it is not one
+/// manifold solid ([`Checked::Combined`]), which its check takes; `None`: `r` is checked as it is.
+fn separate(r: &solidcraft_smlib::Brep, how: Checked) -> std::result::Result<Option<Record>, String> {
+    let split = matches!(how, Checked::Combined) && !r.is_manifold_solid().map_err(|e| format!("check: {e}"))?;
+    split.then(|| r.to_native().map_err(|e| format!("export: {e}"))).transpose()
+}
+
+/// What a step says of a result SMLib's check refuses, naming the operands (the input of a
+/// blend) whose own check (`checks`, in order) fails too: the fault is then theirs.
+pub(crate) fn refuses(checks: impl ExactSizeIterator<Item = solidcraft_smlib::Result<solidcraft_smlib::CheckReport>>) -> String {
+    let n = checks.len();
+    let name = |i: usize| match n {
+        1 => "the input".to_string(),
+        2 => ["the first operand", "the second operand"][i.min(1)].to_string(),
+        _ => format!("operand {i}"),
+    };
+    let failing: Vec<String> = checks.enumerate().filter(|(_, c)| c.as_ref().is_ok_and(|c| !c.is_valid())).map(|(i, _)| name(i)).collect();
+    let whose = if failing.is_empty() { String::new() } else { format!(" ({} already fails it)", failing.join(" and ")) };
+    format!("SMLib's check refuses the result{whose}")
 }
 
 /// A body SMLib's check of what a feature keeps refuses ([`check_kept_counted`]).
@@ -200,19 +220,17 @@ pub fn check_kept_counted(body: &Body) -> std::result::Result<(), KeptRefusal> {
     // A body checked before is not checked again: the check of a heavy imported body takes a
     // minute, and a feature on a body that already fails it asked for it up to three times a
     // step (the body before, its result beside the features after, its result again in line).
-    if let Some(known) = known::get(&body.record) {
+    if let Some(known) = known::get(body.record.arc()) {
         return known;
     }
-    let step = body.unchecked.as_deref().and_then(|u| u.take(&body.record).map(|r| (u, r)));
-    let (what, check) = match step {
-        Some((u, r)) => (u.what.as_str(), check_result_owned(r, u.how)),
+    let verdict = match body.unchecked.as_deref().and_then(|u| u.take(body.record.arc()).map(|r| (u, r))) {
+        Some((u, (r, operands))) => verdict_counted(&u.what, check_result_owned(r, u.how), &operands),
         None => match body.smlib() {
-            Ok(s) => ("SMLib", s.check(solidcraft_smlib::CheckLevel::All).map_err(|e| format!("check: {e}"))),
+            Ok(s) => verdict_counted("SMLib", s.check(CheckLevel::All).map_err(|e| format!("check: {e}")), &[]),
             Err(error) => return Err(KeptRefusal { failures: None, error }),
         },
     };
-    let verdict = verdict_counted(what, check);
-    known::put(&body.record, &verdict);
+    known::put(body.record.arc(), &verdict);
     verdict
 }
 
@@ -220,7 +238,7 @@ pub fn check_kept_counted(body: &Body) -> std::result::Result<(), KeptRefusal> {
 /// about to change such a body checks its result in line, where the result may be kept, not
 /// beside the features after it, where a refusal means doing the feature again.
 pub fn known_refused(body: &Body) -> bool {
-    matches!(known::get(&body.record), Some(Err(_)))
+    matches!(known::get(body.record.arc()), Some(Err(_)))
 }
 
 /// The verdicts [`check_kept_counted`] has reached, by the body's record (bodies share a record
@@ -274,13 +292,18 @@ mod known {
     }
 }
 
-/// What [`check_kept_counted`] makes of SMLib's check of what it read (`what` names the step),
+/// What [`check_kept_counted`] makes of SMLib's check of what step `what` made of `operands`,
 /// with how many tests a refused result fails.
-fn verdict_counted(what: &str, check: std::result::Result<solidcraft_smlib::CheckReport, String>) -> std::result::Result<(), KeptRefusal> {
+fn verdict_counted(
+    what: &str,
+    check: std::result::Result<solidcraft_smlib::CheckReport, String>,
+    operands: &[Arc<Record>],
+) -> std::result::Result<(), KeptRefusal> {
     match check {
         Ok(c) if c.is_valid() => Ok(()),
         Ok(c) => {
-            Err(KeptRefusal { failures: Some(c.failures), error: KernelError::Failed(format!("{what}: SMLib's check refuses the result: {c}")) })
+            let checks = operands.iter().map(|o| solidcraft_smlib::Brep::from_record(o, true).and_then(|s| s.check_owned(CheckLevel::All)));
+            Err(KeptRefusal { failures: Some(c.failures), error: KernelError::Failed(format!("{what}: {}: {c}", refuses(checks))) })
         }
         Err(e) => Err(KeptRefusal { failures: None, error: KernelError::Failed(format!("{what}: {e}")) }),
     }
@@ -312,14 +335,14 @@ pub fn kept_as_refused(body: &Body, before: &Body) -> Option<usize> {
     if body.is_mesh() {
         return None;
     }
-    let came = known::get(&before.record)?.err()?;
+    let came = known::get(before.record.arc())?.err()?;
     let was = came.failures?;
-    if let Some(own) = known::get(&body.record) {
+    if let Some(own) = known::get(body.record.arc()) {
         return own.is_err().then_some(was);
     }
     // The step's own result is not needed for a check: dropped now, not with the body.
-    drop(body.unchecked.as_deref().and_then(|u| u.take(&body.record)));
-    known::put(&body.record, &Err(came));
+    drop(body.unchecked.as_deref().and_then(|u| u.take(body.record.arc())));
+    known::put(body.record.arc(), &Err(came));
     Some(was)
 }
 
@@ -332,27 +355,113 @@ fn check_record(record: &Arc<solidcore_record::brep::Brep>) -> std::result::Resu
     }
     let check = solidcraft_smlib::Brep::from_record(record, true)
         .map_err(|e| format!("{e}"))
-        .and_then(|b| b.check_owned(solidcraft_smlib::CheckLevel::All).map_err(|e| format!("check: {e}")));
-    let verdict = verdict_counted("SMLib", check);
+        .and_then(|b| b.check_owned(CheckLevel::All).map_err(|e| format!("check: {e}")));
+    let verdict = verdict_counted("SMLib", check, &[]);
     known::put(record, &verdict);
     verdict
+}
+
+/// SMLib's check of a body as an operation on it takes it ([`Body::smlib`], at every test): what
+/// it fails, or `None` when it passes or is not SMLib's to make (a mesh body, one SMLib refuses
+/// outright: [`Body::smlib_refusal`] says why). A check that cannot run is the error why.
+///
+/// The check runs on a copy of the body's SMLib form, which it owns, so the token over this
+/// thread's work stops it ([`solidcraft_smlib::Brep::check_owned`]), as it stops a feature's
+/// detached check ([`KeptCheck`]): an import stopped part way stops in the check too.
+pub fn failing_check(body: &Body) -> Result<Option<CheckFailure>> {
+    if body.is_mesh() || body.smlib_refusal().is_some() {
+        return Ok(None);
+    }
+    let copy = body.smlib()?.try_clone().map_err(|e| KernelError::smlib("SMLib copy", e))?;
+    let check = copy.check_owned(solidcraft_smlib::CheckLevel::All).map_err(|e| KernelError::smlib("SMLib's check", e))?;
+    Ok(CheckFailure::of(&check))
+}
+
+/// What SMLib's check failed in a body: how many tests failed, and each test that failed, where
+/// the check reports it (its site: the test's number and name, and the kind of entity it failed
+/// on), with how many times. Shown in a line ([`std::fmt::Display`]): `3 failed tests: SmEdge::Test
+/// #7 Bad Edge Length: less than edge tolerance (×2); SmLoop::Test #2 Bad Loop Orient`, in the
+/// order the check first reported them. Each failure's own values stay in the check's text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CheckFailure {
+    /// Failed tests, as the check counts them.
+    pub failures: usize,
+    /// The tests that failed, each once, in the order the check first reported them.
+    pub tests: Vec<FailedTest>,
+}
+
+/// One test SMLib's check failed: its site in the check.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FailedTest {
+    /// The test as the check names it (`SmEdge::Test #7 Bad Edge Length: less than edge
+    /// tolerance`), without the values of each failure.
+    pub name: String,
+    /// The test's number (`7`), when the check gives one.
+    pub number: Option<u32>,
+    /// The kinds of entity it failed on (`SmVertex`), each once, when the check names them.
+    pub owners: Vec<String>,
+    /// How many times it failed.
+    pub times: usize,
+}
+
+impl CheckFailure {
+    /// The failure `check` reports, `None` when it passes.
+    pub fn of(check: &solidcraft_smlib::CheckReport) -> Option<CheckFailure> {
+        if check.is_valid() {
+            return None;
+        }
+        let mut tests: Vec<FailedTest> = Vec::new();
+        // "AssertValid skipped" says why the second half of the check did not run: not a test failed.
+        for line in check.text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("AssertValid skipped")) {
+            // The test's name ends where its values or its owner start.
+            let name =
+                [line.find(" ("), line.find(" [owner")].into_iter().flatten().min().map_or(line, |end| line.get(..end).unwrap_or(line)).trim_end();
+            let owner = line.rsplit_once("[owner ").and_then(|(_, rest)| rest.strip_suffix(']')).map(str::trim).filter(|o| !o.is_empty());
+            let i = match tests.iter().position(|t| t.name == name) {
+                Some(i) => i,
+                None => {
+                    let number = name.split_once("Test #").and_then(|(_, rest)| {
+                        let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+                        digits.parse().ok()
+                    });
+                    tests.push(FailedTest { name: name.to_string(), number, owners: Vec::new(), times: 0 });
+                    tests.len() - 1
+                }
+            };
+            if let Some(t) = tests.get_mut(i) {
+                t.times += 1;
+                if let Some(owner) = owner.filter(|o| !t.owners.iter().any(|known| known == o)) {
+                    t.owners.push(owner.to_string());
+                }
+            }
+        }
+        Some(CheckFailure { failures: check.failures, tests })
+    }
+}
+
+impl std::fmt::Display for CheckFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = if self.failures == 1 { "" } else { "s" };
+        write!(f, "{} failed test{s}: ", self.failures)?;
+        for (i, t) in self.tests.iter().enumerate() {
+            let sep = if i == 0 { "" } else { "; " };
+            if t.times > 1 { write!(f, "{sep}{} (×{})", t.name, t.times)? } else { write!(f, "{sep}{}", t.name)? }
+        }
+        Ok(())
+    }
 }
 
 /// [`check_result`] of a step's result nobody else reads, which it takes: the token over this
 /// thread's work stops it ([`solidcraft_smlib::Brep::check_owned`]).
 fn check_result_owned(r: solidcraft_smlib::Brep, how: Checked) -> std::result::Result<solidcraft_smlib::CheckReport, String> {
-    fn failed(what: &'static str) -> impl Fn(&dyn std::fmt::Display) -> String {
-        move |e| format!("{what}: {e}")
-    }
-    match how {
-        Checked::Combined if !r.is_manifold_solid().map_err(|e| failed("check")(&e))? => {
-            let record = r.to_native().map_err(|e| failed("export")(&e))?;
+    let check = match separate(&r, how)? {
+        Some(record) => {
             drop(r);
-            let split = solidcraft_smlib::Brep::from_record(&record, true).map_err(|e| failed("the separate solids")(&e))?;
-            split.check_owned(solidcraft_smlib::CheckLevel::All).map_err(|e| failed("check")(&e))
+            solidcraft_smlib::Brep::from_record(&record, true).map_err(|e| format!("the separate solids: {e}"))?.check_owned(CheckLevel::All)
         }
-        _ => r.check_owned(solidcraft_smlib::CheckLevel::All).map_err(|e| failed("check")(&e)),
-    }
+        None => r.check_owned(CheckLevel::All),
+    };
+    check.map_err(|e| format!("check: {e}"))
 }
 
 /// [`check_kept`] of a body, ready to run on another thread ([`detach_kept`]), under the token
@@ -370,7 +479,7 @@ enum Kept {
     /// A mesh body: nothing to check.
     Nothing,
     /// The step's own result, taken from the body.
-    Step { what: String, how: Checked, result: solidcraft_smlib::Brep },
+    Step { what: String, how: Checked, result: solidcraft_smlib::Brep, operands: Vec<Arc<Record>> },
     /// A copy of the body's SMLib form, made when the check was detached.
     Copy(Result<solidcraft_smlib::Brep>),
 }
@@ -388,12 +497,12 @@ pub fn detach_kept(body: &Body) -> KeptCheck {
 /// second evaluation and two more checks in line.
 pub fn detach_kept_from(body: &Body, before: Option<&Body>) -> KeptCheck {
     let stop = solidcraft_smlib::stop::current();
-    let made = Made { record: Arc::downgrade(&body.record), before: before.filter(|b| !b.is_mesh()).map(|b| b.record.clone()) };
+    let made = Made { record: Arc::downgrade(body.record.arc()), before: before.filter(|b| !b.is_mesh()).map(|b| b.record.arc().clone()) };
     if body.is_mesh() {
         return KeptCheck(Kept::Nothing, stop, made);
     }
-    if let Some((u, result)) = body.unchecked.as_deref().and_then(|u| u.take(&body.record).map(|r| (u, r))) {
-        return KeptCheck(Kept::Step { what: u.what.clone(), how: u.how, result }, stop, made);
+    if let Some((u, (result, operands))) = body.unchecked.as_deref().and_then(|u| u.take(body.record.arc()).map(|r| (u, r))) {
+        return KeptCheck(Kept::Step { what: u.what.clone(), how: u.how, result, operands }, stop, made);
     }
     KeptCheck(Kept::Copy(body.smlib().and_then(|b| b.try_clone().map_err(|e| KernelError::smlib("SMLib copy", e)))), stop, made)
 }
@@ -429,8 +538,8 @@ impl Kept {
         match self {
             Kept::Nothing => Ok(()),
             // The step's result and the copy are the check's own: the work's token stops it.
-            Kept::Step { what, how, result } => verdict_counted(&what, check_result_owned(result, how)),
-            Kept::Copy(Ok(copy)) => verdict_counted("SMLib", copy.check_owned(solidcraft_smlib::CheckLevel::All).map_err(|e| format!("check: {e}"))),
+            Kept::Step { what, how, result, operands } => verdict_counted(&what, check_result_owned(result, how), &operands),
+            Kept::Copy(Ok(copy)) => verdict_counted("SMLib", copy.check_owned(CheckLevel::All).map_err(|e| format!("check: {e}")), &[]),
             Kept::Copy(Err(error)) => Err(KeptRefusal { failures: None, error }),
         }
     }
@@ -467,6 +576,37 @@ mod tests {
         assert!(detached.run().is_ok(), "a token never stopped changes nothing");
     }
 
+    /// #17689: [`failing_check`] checks a copy it owns, so a stopped token stops it (an import
+    /// stopped part way), and it names each test the check failed, at its site, once.
+    #[test]
+    fn a_failing_check_stops_with_the_work_and_names_each_failed_test() {
+        use solidcore_record::Vec3;
+        let good = crate::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let mut record = good.record().clone();
+        record.vertices[0].point[2] += 0.5;
+        let bad = Body::from_record(record).unwrap();
+        let stop = solidcraft_smlib::stop::Stop::new();
+        stop.stop();
+        let r = stop.within(|| failing_check(&bad));
+        assert!(r.as_ref().is_err_and(|e| e.to_string().contains("cancelled")), "{r:?}");
+        // Run again with no token: the body's own SMLib form was not touched by the stopped check.
+        let failure = failing_check(&bad).unwrap().expect("the moved corner fails the check");
+        let report = bad.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
+        assert_eq!(failure.failures, report.failures);
+        let lines: Vec<&str> = report.text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("AssertValid skipped")).collect();
+        assert_eq!(failure.tests.iter().map(|t| t.times).sum::<usize>(), lines.len(), "{}", report.text);
+        for t in &failure.tests {
+            assert_eq!(lines.iter().filter(|l| l.starts_with(&t.name)).count(), t.times, "{t:?}");
+            assert_eq!(
+                t.number.map(|n| n.to_string()),
+                t.name.split_once("Test #").map(|(_, r)| r.chars().take_while(char::is_ascii_digit).collect())
+            );
+            assert!(t.owners.iter().all(|o| lines.iter().any(|l| l.starts_with(&t.name) && l.ends_with(&format!("[owner {o}]")))), "{t:?}");
+        }
+        assert!(failure.to_string().starts_with(&format!("{} failed test", report.failures)), "{failure}");
+        assert_eq!(failing_check(&good).unwrap(), None, "the box passes");
+    }
+
     #[test]
     fn the_mode_reaches_the_kernels_worker_threads() {
         let items = [0, 1, 2, 3];
@@ -477,7 +617,8 @@ mod tests {
 
     /// A box with one corner moved off its three edges: SMLib's check refuses it. Under each_step
     /// the boolean that takes it refuses its result there; under each_feature it is not checked,
-    /// says the check was left for later, and the check of the body kept refuses it.
+    /// says the check was left for later, and the check of the body kept refuses it. Both name
+    /// the operand that already fails the check (#17230), also when the check runs detached.
     #[test]
     fn a_body_the_check_refuses_is_refused_at_the_step_or_at_the_end() {
         use solidcore_record::Vec3;
@@ -495,7 +636,25 @@ mod tests {
         let (joined, deferred) = validating(Validation::EachFeature, || crate::boolean(&bad, &tool, crate::BoolOp::Union));
         assert!(deferred);
         let joined = joined.unwrap().unwrap();
-        assert!(check_kept(&joined).unwrap_err().to_string().contains("SMLib's check refuses the result"));
+        let detached = detach_kept(&joined).run().unwrap_err().to_string();
+        assert!(detached.contains("SMLib boolean: SMLib's check refuses the result (the first operand already fails it)"), "{detached}");
+        let (joined, _) = validating(Validation::EachFeature, || crate::boolean(&bad, &tool, crate::BoolOp::Union));
+        let e = check_kept(&joined.unwrap().unwrap()).unwrap_err().to_string();
+        assert!(e.contains("SMLib boolean: SMLib's check refuses the result (the first operand already fails it)"), "{e}");
+        // Only the operand that fails is named.
+        let (joined, _) = validating(Validation::EachFeature, || crate::boolean(&tool, &bad, crate::BoolOp::Union));
+        let e = check_kept(&joined.unwrap().unwrap()).unwrap_err().to_string();
+        assert!(e.contains("(the second operand already fails it)"), "{e}");
+        // The checks took the operands' records with the results: the bodies kept don't hold them.
+        assert_eq!(Arc::strong_count(bad.record.arc()), 1);
+        // A round on an edge away from the moved corner: the blend names its input the same way.
+        let edge = [Vec3::new(10.0, 5.0, 10.0)];
+        let (step, _) = validating(Validation::EachStep, || crate::fillet(&bad, &edge, 1.0));
+        let e = step.unwrap_err().to_string();
+        assert!(e.contains("SMLib's check refuses the result (the input already fails it)"), "{e}");
+        let (round, deferred) = validating(Validation::EachFeature, || crate::fillet(&bad, &edge, 1.0));
+        let e = check_kept(&round.unwrap()).unwrap_err().to_string();
+        assert!(deferred && e.contains("SMLib fillet: SMLib's check refuses the result (the input already fails it)"), "{e}");
         let (off, deferred) = validating(Validation::Off, || crate::boolean(&bad, &tool, crate::BoolOp::Union));
         assert!(off.is_ok_and(|b| b.is_some()) && !deferred);
     }
