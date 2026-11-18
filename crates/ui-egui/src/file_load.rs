@@ -63,6 +63,10 @@ pub enum Kind {
     UpdateLinks,
     /// Read a point cloud's file again (`pointcloud.reload`, with the request's `cloud`).
     ReloadCloud,
+    /// Read the active design's own file again into its tab (`doc.open` of its path), as Versions
+    /// does once it has put back an earlier version of it (fork): beside the window, where a design
+    /// with a slow feature held the window until it was rebuilt.
+    ReloadDesign,
 }
 
 impl Kind {
@@ -144,7 +148,7 @@ impl Request {
     }
     /// It reads files the active design already names, and changes that design in place.
     fn reads_again(&self) -> bool {
-        matches!(self.kind, Kind::UpdateLinks | Kind::ReloadCloud)
+        matches!(self.kind, Kind::UpdateLinks | Kind::ReloadCloud | Kind::ReloadDesign)
     }
     /// The command's parameters: the path and the caller's import options.
     fn params(&self) -> Value {
@@ -170,6 +174,7 @@ impl Request {
             Kind::ExportSheet => ("drawing.export", Value::Object(self.options.clone())),
             Kind::UpdateLinks => ("component.update_links", Value::Object(self.options.clone())),
             Kind::ReloadCloud => ("pointcloud.reload", Value::Object(self.options.clone())),
+            Kind::ReloadDesign => ("doc.open", self.params()),
         }
     }
     fn answer(&self, r: Result<Value, String>) {
@@ -606,7 +611,7 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
                 }
                 r
             }
-            Kind::UpdateLinks | Kind::ReloadCloud => {
+            Kind::UpdateLinks | Kind::ReloadCloud | Kind::ReloadDesign => {
                 let (command, params) = request.command();
                 solidcraft_engine::io::vfs::allowing_hosts(&request.allow_hosts, || app.run(command, params))
             }
@@ -1702,6 +1707,9 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                 }
                 let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
                 app.set_status(language.format("ui.command_done", &[("command", language.label(crate::command_label(id)))]), false);
+                if let Some(note) = &request.note {
+                    app.set_status(note.clone(), false);
+                }
                 // A design it could not read is said as when that was all it was asked.
                 if let Some(f) = r.as_ref().ok().and_then(|v| v["failed"].as_array()).and_then(|f| f.first()) {
                     let (name, why) = (f["name"].as_str().unwrap_or_default(), f["error"].as_str().unwrap_or_default());
@@ -1915,7 +1923,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             ),
             None => app.session.doc.name.clone(),
         },
-        Kind::ReloadCloud => app.session.doc.name.clone(),
+        Kind::ReloadCloud | Kind::ReloadDesign => app.session.doc.name.clone(),
         _ => std::path::Path::new(&r.request.path).file_name().map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
     };
     let phase = r.phase.load(Ordering::Relaxed);
@@ -1968,6 +1976,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             Kind::ExportSheet => "drawing_export.exporting",
             Kind::UpdateLinks => "file_load.updating_links",
             Kind::ReloadCloud => "file_load.reloading_cloud",
+            Kind::ReloadDesign => "file_load.opening",
         })
     };
     let icon = match r.request.kind {
@@ -1977,6 +1986,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Kind::ExportDxf | Kind::ExportSheet => "export",
         Kind::UpdateLinks => "update",
         Kind::ReloadCloud => "import",
+        Kind::ReloadDesign => "open",
     };
     let (closed, action) = ui_kit::Window::new(card_id, icon, title)
         .cards(((cover.width() - 16.0) / solidcraft_theme::Tokens::get().form_card_width).clamp(0.5, 1.3))

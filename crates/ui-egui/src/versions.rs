@@ -288,16 +288,22 @@ fn done(app: &mut SolveApp, after: After, result: Result<Value, String>) {
                 && relative(&folder, &path).is_some_and(|rel| restored.contains(&rel))
                 && !app.session.is_dirty()
             {
-                let _ = app.run("doc.open", json!({"path": path}));
+                // Read again beside the window: on it, a design with a slow feature held the
+                // window until the whole design was rebuilt.
+                let mut request = crate::file_load::Request::new(&path, crate::file_load::Kind::ReloadDesign);
+                request.note = Some(format(key_for(restored.len()), &[("count", &restored.len().to_string())]));
+                if let Err(e) = crate::file_load::begin_request(app, request) {
+                    app.set_status(e, true);
+                }
             }
-            let key = if restored.len() == 1 { "ui.versions_restored_one" } else { "ui.versions_restored_other" };
-            app.set_status(format(key, &[("count", &restored.len().to_string())]), false);
+            app.set_status(format(key_for(restored.len()), &[("count", &restored.len().to_string())]), false);
             app.versions.selected = None;
         }
         After::Open | After::NewPart => {
             if let Some(file) = r["file"].as_str() {
                 if opens_here(file) {
-                    app.open_path_with(file, &serde_json::Map::new());
+                    // Opened beside the window, as File ▸ Open does.
+                    crate::file_load::begin(app, file, false);
                 } else if let Some(open) = &app.services.open_file {
                     // A drawing, document or KiCad file: in its own program.
                     open(file);
@@ -312,6 +318,11 @@ fn done(app: &mut SolveApp, after: After, result: Result<Value, String>) {
         After::Named => app.set_status(format("ui.versions_named", &[("name", r["tag"].as_str().unwrap_or(""))]), false),
         After::Released { name, revision } => app.set_status(format("ui.versions_released", &[("name", &name), ("revision", &revision)]), false),
     }
+}
+
+/// The status once `count` files are put back.
+fn key_for(count: usize) -> &'static str {
+    if count == 1 { "ui.versions_restored_one" } else { "ui.versions_restored_other" }
 }
 
 fn check_in_now(app: &mut SolveApp, q: Queued) {

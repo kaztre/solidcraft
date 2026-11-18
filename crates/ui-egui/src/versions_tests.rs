@@ -76,4 +76,20 @@ fn a_part_on_its_own_keeps_versions_checks_in_and_is_released() {
     let first = history["commits"][0]["id"].as_str().unwrap().to_string();
     h.app.run("versions.restore", json!({"folder": folder.to_string_lossy(), "commit": first, "path": "Tether clip.solidcraft"})).unwrap();
     settle(&mut h, |app| status(app).is_some_and(|s| s["changes"].as_array().is_some_and(Vec::is_empty)));
+    // The design in front, one of the files put back, is read again beside the window, not on it:
+    // a design with a slow feature held the window until it was rebuilt.
+    assert_eq!(h.app.session.doc.features.len(), 2, "still the design as it was");
+    super::done(&mut h.app, super::After::Restored, Ok(json!({"restored": ["Tether clip.solidcraft"]})));
+    assert!(!h.app.file_load.idle(), "the reload runs beside the window");
+    assert_eq!(h.app.session.doc.features.len(), 2, "nothing read on the window's thread");
+    for _ in 0..1000 {
+        if h.app.file_load.idle() {
+            break;
+        }
+        h.frames(1);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(h.app.file_load.idle(), "the reload finished");
+    assert_eq!(h.app.session.doc.features.len(), 1, "the first version, in the same tab");
+    assert_eq!(h.app.docs.count(), 1);
 }
