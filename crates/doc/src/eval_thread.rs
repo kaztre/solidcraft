@@ -896,7 +896,13 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         }
     }
     // A print clearance or a fitted hole changes each thread before its cut: those cut one by one.
-    if *modeled && *tip == ThreadTip::None && print_clearance.is_none() && !*refit && selected.len() > 1 && super::EVAL_VALIDATION.get() == kernel::Validation::EachFeature {
+    if *modeled
+        && *tip == ThreadTip::None
+        && print_clearance.is_none()
+        && !*refit
+        && selected.len() > 1
+        && super::EVAL_VALIDATION.get() == kernel::Validation::EachFeature
+    {
         match cut_grouped(st, &selected, *continuous_flanks) {
             Ok(Some(next)) => {
                 *st = next;

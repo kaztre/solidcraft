@@ -113,7 +113,7 @@ fn perform(app: &mut SolveApp, entry: Entry, action: Action) {
             });
         }
         Action::Move => {
-            app.pick_folder(&solidcraft_ui_text::tr("library.action_move"), move |app, folder| {
+            app.pick_folder(solidcraft_ui_text::tr("library.action_move"), move |app, folder| {
                 let Some(folder) = folder else { return };
                 let destination = std::path::Path::new(&folder).join(&entry.name);
                 execute(app, &entry, action, Some(&destination));

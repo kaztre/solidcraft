@@ -445,7 +445,7 @@ pub(super) fn available(app: &SolveApp) -> bool {
 }
 
 fn choose_folder(app: &mut SolveApp) {
-    app.pick_folder(&solidcraft_ui_text::tr("library.choose_folder"), |app, path| {
+    app.pick_folder(solidcraft_ui_text::tr("library.choose_folder"), |app, path| {
         if let Some(path) = path {
             app.library.set_root(PathBuf::from(path));
             app.preferences.show_document_browser = true;

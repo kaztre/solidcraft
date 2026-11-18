@@ -2580,7 +2580,8 @@ mod tests {
         let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
         let in_band = |r: f64| (0.08..=0.1166).contains(&r);
         let search =
-            largest_that_fits(2.5, None, None, |r| if in_band(r) { Ok(body.clone()) } else { Err(KernelError::TooLarge("too large".into())) }).unwrap();
+            largest_that_fits(2.5, None, None, |r| if in_band(r) { Ok(body.clone()) } else { Err(KernelError::TooLarge("too large".into())) })
+                .unwrap();
         assert!(search.found.is_none(), "bisection misses the band");
         assert!(search.smallest_refused.is_some() && search.tried > 1);
     }

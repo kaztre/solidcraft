@@ -1566,7 +1566,14 @@ impl StepReading {
             for r in loose {
                 rd.rep_bodies(r, &identity, &[], UNNAMED_PART, None, &mut bodies, 0);
             }
-            tree.push(StepNode { name: UNNAMED_PART.into(), transform: identity, bodies, items: Vec::new(), left_out: Vec::new(), children: Vec::new() });
+            tree.push(StepNode {
+                name: UNNAMED_PART.into(),
+                transform: identity,
+                bodies,
+                items: Vec::new(),
+                left_out: Vec::new(),
+                children: Vec::new(),
+            });
         }
         // Topology outside every representation (bare geometry files, or ones whose topology no
         // representation lists): its unlisted solids, shells and faces, read in the file's one
