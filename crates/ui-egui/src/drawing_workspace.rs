@@ -39,6 +39,8 @@ pub struct State {
     settings: Option<Rect>,
     /// The sheet page's camera, zoom and drawn marks: screen only, never saved.
     pub(crate) page: crate::drawing_sheet_page::Page,
+    /// The drawing that was open when Drawing was left: entering again opens it.
+    last_drawing: Option<u64>,
 }
 
 pub fn active(app: &SolveApp) -> bool {
@@ -70,8 +72,10 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
         if !active(app) {
             app.drawing_workspace.previous_tab = Some(app.ui.tab.clone());
             app.ui.tab = "DRAWING LAYOUT".into();
+            reopen(app);
         }
     } else if active(app) {
+        close(app);
         app.ui.tab = app.drawing_workspace.previous_tab.take().unwrap_or_else(|| "MODEL".into());
         app.drawing_workspace.options = None;
         app.drawing_workspace.placement = None;
@@ -88,6 +92,31 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
     app.ui.ribbon_context = None;
     app.cancel_view_animation();
     Ok(())
+}
+
+/// Leaving Drawing closes the open drawing: while one is open the model's commands (Show/Hide,
+/// Rename, every feature) are refused, and nothing else in the app closes it. A sheet sketch still
+/// being edited keeps it open.
+fn close(app: &mut SolveApp) {
+    if let Some(id) = app.session.open_drawing
+        && app.run("drawing.close", serde_json::json!({})).is_ok()
+    {
+        app.drawing_workspace.last_drawing = Some(id);
+    }
+}
+
+/// Entering Drawing opens the drawing it was left on, else the design's first, so the sheet page
+/// comes back instead of the new-drawing page over the drawings the design already has.
+fn reopen(app: &mut SolveApp) {
+    let last = app.drawing_workspace.last_drawing.take();
+    if app.session.open_drawing.is_some() {
+        return;
+    }
+    let drawings = &app.session.doc.drawings;
+    let Some(id) = last.filter(|id| drawings.iter().any(|d| d.id == *id)).or_else(|| drawings.first().map(|d| d.id)) else {
+        return;
+    };
+    let _ = app.run("drawing.open", serde_json::json!({"drawing": solidcraft_engine::doc::ids::encode(id)}));
 }
 
 pub fn reset_document(app: &mut SolveApp) {
@@ -882,6 +911,38 @@ fn panel_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
 mod tests {
     use super::*;
     use crate::scenario::Harness;
+
+    /// Leaving Drawing closes its drawing, so the model can change again (Show/Hide was refused
+    /// with "a drawing is open" after a drawing was made, and nothing closed it); entering again
+    /// opens the drawing it was left on, else the design's first.
+    #[test]
+    fn leaving_drawing_frees_the_model_and_entering_opens_the_drawing_again() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.drawings_preview = true;
+        h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        h.app.run("drawing.create", serde_json::json!({"name":"First"})).unwrap();
+        h.app.run("drawing.create", serde_json::json!({"name":"Second"})).unwrap();
+        let second = h.app.session.open_drawing;
+        assert!(h.app.run("solid.box", serde_json::json!({"length":5,"width":5,"height":5})).is_err(), "the model waits while a drawing is open");
+
+        crate::workspace::enter(&mut h.app, "design").unwrap();
+        assert!(!active(&h.app) && h.app.session.open_drawing.is_none());
+        h.app.run("solid.box", serde_json::json!({"length":5,"width":5,"height":5})).unwrap();
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        assert_eq!(h.app.session.open_drawing, second, "back on the drawing it was left on");
+
+        crate::workspace::enter(&mut h.app, "design").unwrap();
+        h.app.drawing_workspace.last_drawing = None;
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        assert_eq!(h.app.session.open_drawing, h.app.session.doc.drawings.first().map(|d| d.id), "else the design's first");
+
+        // Turning drawings off leaves Drawing the same way.
+        h.app.preferences.drawings_preview = false;
+        reconcile(&mut h.app);
+        assert!(!active(&h.app) && h.app.session.open_drawing.is_none());
+    }
 
     /// Drawings are off until Preferences > Design turns them on: Drawing stays "coming later" in
     /// the workspace menu and the workspace refuses to open; turned off again, the app leaves it.
