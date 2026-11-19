@@ -68,7 +68,7 @@
 //! [`groups`]: crate::drawing_pictures::groups
 //! [`TitleBlockLayout::paper`]: solidcraft_geom::title_block::TitleBlockLayout::paper
 
-use std::borrow::Borrow;
+use std::borrow::{Borrow, Cow};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -558,8 +558,30 @@ pub fn cached_view_boundary(s: &Session, drawing: u64, view: u64) -> Option<Aabb
 /// of its views by id. A view with nothing to measure, or one that can't be drawn, is left out and
 /// says why; the sheet is refused only when it can't be drawn at all.
 pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
+    build_from(s, drawing, sheet, None).map(|(scene, _)| scene)
+}
+
+/// A view [`build_from`] drew of the design as it places its parts: what the cache keeps of it
+/// ([`Cache::keep_built`]), so the next read of its sheet draws it from there.
+struct Built {
+    id: u64,
+    view: ResolvedView,
+    drawn: Drawn,
+    shows: Option<Arc<SourceKey>>,
+}
+
+/// [`build`], taking from `s`'s cache each view it holds drawn from `state` as the view is now
+/// (`state` is `s`'s world state, given for the drawing open): a view of the design as it places its
+/// parts, drawn by the sheet page or by an earlier read, isn't worked out again. A whole assembly's
+/// four views took over a minute a read, every read (a check of each sheet, then its scene). The
+/// views it did draw come back for the cache.
+fn build_from(s: &Session, drawing: &Drawing, sheet: u64, state: Option<&Arc<ModelState>>) -> Result<(SheetScene, Vec<Built>)> {
     let record = sheet_of(drawing, sheet)?;
     let on = views_on(drawing, sheet)?;
+    // A part moved and not captured yet is drawn from a copy, which the cache's lines aren't of.
+    let state = state.filter(|_| s.pending_moves.is_empty() && s.drawing_scenes.drawing == Some(drawing.id));
+    let held = &s.drawing_scenes.views;
+    let (mut built, mut taken) = (Vec::new(), Vec::new());
     // Where the design places its parts, as the provider draws them.
     let copy = (!s.pending_moves.is_empty()).then(|| designed(s));
     let s = copy.as_ref().unwrap_or(s);
@@ -575,15 +597,29 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     let mut owners = Vec::new();
     let drawn = on.iter().map(|(id, view, centre)| {
         let choice = sessions.choice(view);
+        let cached = state.filter(|_| choice.is_placed());
+        if let Some(state) = cached
+            && let Some(entry) = held.get(id).filter(|e| Arc::ptr_eq(&e.state, state) && e.view == *view)
+        {
+            taken.extend(entry.drawn.owners.clone().map(|of| (*id, state.clone(), of)));
+            return (*id, *centre, Cow::Borrowed(&entry.drawn));
+        }
+        let mut shows = None;
         let drawn = match sessions.drawing(&choice) {
             Ok((from, failing)) => {
                 let shown = shown.entry(choice.clone()).or_insert_with(|| crate::drawing_view::shown(from));
+                if cached.is_some() {
+                    shows = SourceKey::of(shown);
+                }
                 draw(from, failing, shown, prepared.entry(choice.clone()).or_default(), *id, view)
             }
             Err(why) => draw(s, &[], &Err(why), &mut PreparedBodies::default(), *id, view),
         };
+        if cached.is_some() {
+            built.push(Built { id: *id, view: view.clone(), drawn: drawn.clone(), shows });
+        }
         owners.extend(drawn.owners.clone().map(|of| (*id, choice, of)));
-        (*id, *centre, drawn)
+        (*id, *centre, Cow::Owned(drawn))
     });
     let lettering = Lettering::of(s, drawing);
     let (text, _) = block_text(record, &lettering, &cell_texts(s, drawing, sheet), true)?;
@@ -621,15 +657,30 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     // Each drawn view's bodies with the world state of the session it drew from: a view that draws its
     // parts apart has its copy's, as the sheet shows them.
     let state_of = |choice: &Choice| Some(shown.get(choice)?.as_ref().ok()?.state.clone());
-    let drawn = owners.into_iter().filter(|(id, ..)| in_scene(&views, *id)).filter_map(|(_, choice, of)| Some((state_of(&choice)?, of))).collect();
-    Ok(SheetScene { scene, views, objects, dimensions, notes, balloons, tables, tags, out_of_date, drawn, sketches, fills })
+    let mut drawn: Vec<(u64, Arc<ModelState>, Arc<Owners>)> =
+        owners.into_iter().filter_map(|(id, choice, of)| Some((id, state_of(&choice)?, of))).chain(taken).filter(|(id, ..)| in_scene(&views, *id)).collect();
+    drawn.sort_by_key(|(id, ..)| *id);
+    let drawn = drawn.into_iter().map(|(_, state, of)| (state, of)).collect();
+    Ok((SheetScene { scene, views, objects, dimensions, notes, balloons, tables, tags, out_of_date, drawn, sketches, fills }, built))
 }
 
 /// Sheet `sheet` of `d`, the drawing open, as a command reads it: drawn at once ([`build`]), or for a
 /// deferred drawing, what its last [`update`] allows, with what that leaves behind listed.
 pub fn as_shown(s: &mut Session, d: &Drawing, sheet: u64) -> Result<SheetScene> {
     if d.updates == Updates::Automatic {
-        return build(s, d, sheet);
+        // The drawing open has the cache: its views drawn already are taken from it, and those drawn
+        // here are kept in it, for the sheet page and the next read.
+        let state = if s.open_drawing == Some(d.id) { s.world_state().ok() } else { None };
+        if let Some(state) = &state {
+            forget_closed(s);
+            let on: Vec<u64> = d.views.iter().filter(|v| v.sheet == sheet).map(|v| v.id).collect();
+            catch_up(s, d, on.into_iter(), state);
+        }
+        let (scene, built) = build_from(s, d, sheet, state.as_ref())?;
+        if let Some(state) = &state {
+            s.drawing_scenes.keep_built(built, state);
+        }
+        return Ok(scene);
     }
     extract(s, sheet)?;
     settle(s, d);
@@ -664,6 +715,41 @@ pub fn as_shown(s: &mut Session, d: &Drawing, sheet: u64) -> Result<SheetScene> 
         sketches: shown.sketches,
         fills: shown.fills,
     })
+}
+
+/// The views a copy of a session drew while it read sheets of the drawing open beside the window
+/// ([`drawn_on_a_copy`]), for the session to keep ([`keep_drawn_on_a_copy`]).
+pub struct DrawnOnACopy {
+    drawing: u64,
+    state: Arc<ModelState>,
+    views: Vec<Built>,
+}
+
+/// What `copy`, a copy of a session ([`Session::scratch_as_shown`]), holds drawn of the drawing open
+/// from its world state, once it has read sheets of it: nothing when it read none.
+pub fn drawn_on_a_copy(copy: &Session) -> Option<DrawnOnACopy> {
+    let drawing = copy.open_drawing.filter(|d| copy.drawing_scenes.drawing == Some(*d))?;
+    let state = copy.world_state().ok()?;
+    let views = copy.drawing_scenes.drawn_from(&state);
+    (!views.is_empty()).then_some(DrawnOnACopy { drawing, state, views })
+}
+
+/// Keeps in `s` the views a copy of it drew ([`drawn_on_a_copy`]), while `s` still shows that drawing
+/// from that world state: the sheet page then shows them without drawing them, and so does the next
+/// read. Says whether any was kept.
+pub fn keep_drawn_on_a_copy(s: &mut Session, drawn: DrawnOnACopy) -> bool {
+    let DrawnOnACopy { drawing, state, views } = drawn;
+    let same = s.open_drawing == Some(drawing) && s.world_state().is_ok_and(|now| Arc::ptr_eq(&now, &state));
+    let Some(d) = same.then(|| s.drawing(CMD).ok().cloned()).flatten() else { return false };
+    forget_closed(s);
+    catch_up(s, &d, std::iter::empty(), &state);
+    // Each as the drawing has it now, and not drawn here meanwhile.
+    let cache = &s.drawing_scenes;
+    let wanted = |b: &Built| d.resolve_view(b.id).is_ok_and(|now| now == b.view) && !cache.fresh(b.id, &state, &b.view);
+    let views: Vec<Built> = views.into_iter().filter(wanted).collect();
+    let any = !views.is_empty();
+    s.drawing_scenes.keep_built(views, &state);
+    any
 }
 
 /// Draws what is waiting on the sheet last extracted, as the sheet page would: each view once, then
@@ -1820,6 +1906,9 @@ pub struct Cache {
     /// Views drawn, for tests: a move draws none.
     #[cfg(test)]
     projections: usize,
+    /// Views a read of a sheet drew and kept, for tests: a second read draws none.
+    #[cfg(test)]
+    built: usize,
     #[cfg(test)]
     sketch_solves: usize,
     #[cfg(test)]
@@ -2151,6 +2240,28 @@ impl Cache {
             let entry = SketchEntry { source: kept.source, context: kept.context, drawn: kept.drawn, serial: self.serial };
             self.sketches.insert(id, entry);
         }
+    }
+
+    /// Keeps the views a read of a sheet drew ([`build_from`]) from `state`, each numbered as a view's
+    /// job numbers its own ([`finish_view`]): its last pictures show until they are drawn again, and its
+    /// dimensions are read again through it.
+    fn keep_built(&mut self, built: Vec<Built>, state: &Arc<ModelState>) {
+        for Built { id, view, drawn, shows } in built {
+            self.serial = self.serial.wrapping_add(1);
+            let pixels = self.views.remove(&id).map(|e| e.pixels).unwrap_or_default();
+            self.views.insert(id, Entry { state: state.clone(), shows, view, drawn, serial: self.serial, pixels });
+            #[cfg(test)]
+            {
+                self.built += 1;
+            }
+        }
+    }
+
+    /// The views drawn from `state`: what a copy of the session holds once it has answered a read
+    /// beside the window ([`drawn_on_a_copy`]).
+    fn drawn_from(&self, state: &Arc<ModelState>) -> Vec<Built> {
+        let built = |(id, e): (&u64, &Entry)| Built { id: *id, view: e.view.clone(), drawn: e.drawn.clone(), shows: e.shows.clone() };
+        self.views.iter().filter(|(_, e)| Arc::ptr_eq(&e.state, state)).map(built).collect()
     }
 
     /// `d` is deferred, and `state` isn't the one its last [`update`] took.

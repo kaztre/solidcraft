@@ -991,6 +991,28 @@ fn an_inspection_on_a_copy_reports_the_history_and_the_file() {
     assert!(saved.as_str().is_some_and(|p| p.ends_with("boxes.solidcraft")), "{saved}");
 }
 
+/// An agent's read of the drawing open (a check of every sheet) draws its views on a copy, off the
+/// window thread: on the window thread a check of a drawing with an assembly on it held the window
+/// for minutes. The views the copy drew come back, so the sheet page has none to draw.
+#[test]
+fn a_check_of_the_drawing_open_runs_on_a_copy_and_its_views_come_back() {
+    let mut h = block_boss_hole();
+    let (tx, rx) = std::sync::mpsc::channel();
+    h.app.control_rx = Some(rx);
+    h.app.run("drawing.create", json!({})).unwrap();
+    let sheet = h.app.run("drawing.inspect", json!({})).unwrap()["sheets"][0]["id"].clone();
+    h.app.run("drawing.view.base", json!({"sheet": sheet, "view": "front", "position_mm": [150, 150]})).unwrap();
+    let check = ask(&tx, "engine.execute", json!({"command": "drawing.check", "params": {}}));
+    h.frames(1);
+    assert_eq!(h.app.control_answering.len(), 1, "read a copy");
+    let r = reply_to(&mut h, &check);
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(r["result"], h.app.run("drawing.check", json!({})).unwrap());
+    let standing = h.app.run("drawing.status", json!({})).unwrap();
+    assert!(standing.to_string().contains("\"current\""), "the view the copy drew is the session's: {standing}");
+    assert!(!standing.to_string().contains("\"out_of_date\""), "{standing}");
+}
+
 /// A reading on a copy keeps the request's own `param_check` (#9184), as one run here does: its
 /// reply says the level, and a word that is no level is refused.
 #[test]

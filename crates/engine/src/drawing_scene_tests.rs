@@ -1700,6 +1700,43 @@ fn a_scratch_export_copy_shares_view_and_dimension_groups() {
     assert!(!same_group(original, &deep_clone), "a deep clone of a dimension must fail the pointer check");
 }
 
+/// A read of a sheet of the drawing open (a check, its scene, an export) keeps the views it draws,
+/// and the next read takes them: a check of a whole assembly's sheet drew its four views again each
+/// time, over a minute a read. The sheet page shows them without drawing them either, a copy that
+/// read beside the window hands its views back, and a model change draws them again.
+#[test]
+fn a_second_read_of_a_sheet_draws_no_view_again() {
+    let (mut s, sheet, _) = front_and_top();
+    let check = json!({"sheet": ids::encode(sheet)});
+    let at_once = bytes(&built(&s, sheet).scene);
+    // Beside the window first: the copy draws both views, and the session keeps them.
+    let mut copy = s.scratch_as_shown();
+    let there = copy.execute("drawing.check", &check).unwrap();
+    assert_eq!(copy.drawing_scenes.built, 2);
+    let drawn = drawn_on_a_copy(&copy).expect("the copy drew the sheet's views");
+    assert!(keep_drawn_on_a_copy(&mut s, drawn), "the session keeps them");
+    let kept = s.drawing_scenes.built;
+    // Here: nothing is drawn again, and the answer and the scene are as when drawn at once.
+    let here = run(&mut s, "drawing.check", check.clone());
+    let d = s.drawing("test").unwrap().clone();
+    let shown = as_shown(&mut s, &d, sheet).unwrap();
+    assert_eq!((s.drawing_scenes.built, &here, bytes(&shown.scene)), (kept, &there, at_once));
+    // The sheet page has nothing to draw.
+    let page = settled(&mut s, sheet);
+    assert_eq!((page.stale.len(), s.drawing_scenes.projections), (0, 0));
+    // The model changes: the views are drawn again, once.
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 20], "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(d.id)}));
+    let before = s.drawing_scenes.built;
+    run(&mut s, "drawing.check", check.clone());
+    assert_eq!(s.drawing_scenes.built, before + 2);
+    run(&mut s, "drawing.check", check);
+    assert_eq!(s.drawing_scenes.built, before + 2);
+    let d = s.drawing("test").unwrap().clone();
+    assert_eq!(bytes(&as_shown(&mut s, &d, sheet).unwrap().scene), bytes(&built(&s, sheet).scene));
+}
+
 /// The copy a background export runs on ([`Session::scratch_as_shown`]) exports a sheet as the
 /// session does: a drawing that isn't deferred, drawn at once, also after a view's edit; a
 /// deferred drawing after its update, with a view edited since; and one held since its update,

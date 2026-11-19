@@ -23,7 +23,7 @@ A drawing a machinist can make the part from, without the model and without aski
 6. **Callouts:** a thread, chamfer or finish is a note with a leader: `anchor` `{edge}` at an edge's `mid` from `model.edges`. General notes are one numbered note near the title block.
 
 ## Verify, then fix
-- `drawing.check {}`: nothing lost, failed or off the sheet.
+- `drawing.check {"sheet": …}`, the sheet you changed, not every sheet each time: nothing lost, failed or off the sheet. One `drawing.check {}` of the whole drawing at the end.
 - `drawing.scene` lists `objects` with `bounds_mm`: no note or dimension text may overlap another or a view.
 - `drawing.sheet.show`, then `screenshot {"source":"window"}`. Read it as the machinist: can every feature be made and measured? Fix and look again.
 

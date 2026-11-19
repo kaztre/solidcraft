@@ -138,6 +138,17 @@ const READ_ON_A_COPY: &[&str] = &[
     "occurrence.properties",
 ];
 
+/// Reads of the drawing open that draw its sheets' views (a check of every sheet, a sheet's scene, an
+/// export): on a copy that shows the drawing as the session does, whatever the preference. A check
+/// of a drawing with a whole assembly on it held the window for minutes. The views the copy draws
+/// come back for the sheet page ([`solidcraft_engine::drawing_scene::keep_drawn_on_a_copy`]).
+const DRAWING_READ_ON_A_COPY: &[&str] = &["drawing.check", "drawing.scene", "drawing.export"];
+
+/// Whether command `id`, answered on a copy, writes a file there.
+fn writes_a_file(id: &str) -> bool {
+    ANSWERED_ON_A_COPY.contains(&id) || id == "drawing.export"
+}
+
 /// Exports and readings computing at once; more run here.
 const MAX_ANSWERING: usize = 4;
 
@@ -178,7 +189,7 @@ fn reading(req: &ControlRequest) -> Option<(&'static str, Value)> {
         "document.inspect" => Some(("document.inspect", req.params.clone())),
         "engine.execute" | "command" => {
             let (command, params) = executed(&req.params)?;
-            spec_id(command).filter(|id| READ_ON_A_COPY.contains(id)).map(|id| (id, params))
+            spec_id(command).filter(|id| READ_ON_A_COPY.contains(id) || DRAWING_READ_ON_A_COPY.contains(id)).map(|id| (id, params))
         }
         _ => None,
     }
@@ -208,7 +219,8 @@ enum Work {
     /// was computed for.
     Ahead { commands: Vec<(String, Value)>, doc: Arc<solidcraft_engine::doc::Document>, revision: u64, tries: u8, kept: Arc<KeptResults> },
     /// Run on a copy; the reply comes from there.
-    Answer { inspection: Option<(u64, usize)> },
+    /// `drawn`: the views a read of the drawing open drew there, for the session to keep.
+    Answer { inspection: Option<(u64, usize)>, drawn: Option<Receiver<solidcraft_engine::drawing_scene::DrawnOnACopy>> },
     /// External code executes once on its worker. Stale/cancelled results are discarded.
     Plugin {
         prepared: Receiver<Result<solidcraft_engine::ComputedCommands, String>>,
@@ -670,10 +682,12 @@ impl SolveApp {
         // The request's own level (#9184) checks it on the copy, and the reply says so, as
         // `control::handle` does; a word that is no level is refused there.
         let Ok(level) = crate::control::request_param_check(&req.method, &req.params) else { return Some(req) };
-        let mut copy = self.session.scratch();
+        let drawing = DRAWING_READ_ON_A_COPY.contains(&id);
+        let mut copy = if drawing { self.session.scratch_as_shown() } else { self.session.scratch() };
         if let Some(level) = level {
             copy.param_check = level;
         }
+        let (drawn_tx, drawn) = std::sync::mpsc::channel();
         // The copy has no history and no file (#9624): an inspection reports the design's own.
         let s = &self.session;
         let own = (id == "document.inspect").then(|| (s.undo.len(), s.redo.len(), s.path.clone()));
@@ -685,7 +699,11 @@ impl SolveApp {
             if let Some(gate) = gate {
                 let _ = gate.lock().ok()?.recv();
             }
-            let mut reply = match copy.execute(id, &params) {
+            let result = copy.execute(id, &params);
+            if drawing && let Some(drawn) = solidcraft_engine::drawing_scene::drawn_on_a_copy(&copy) {
+                let _ = drawn_tx.send(drawn);
+            }
+            let mut reply = match result {
                 Ok(mut v) => {
                     if let (Some((undo, redo, path)), Some(o)) = (own, v.as_object_mut()) {
                         o.insert("undo".into(), json!(undo));
@@ -702,12 +720,12 @@ impl SolveApp {
             Some(reply)
         });
         let Some(rx) = rx else { return Some(req) };
-        let job = ControlJob { label: label(self, id), req, work: Work::Answer { inspection }, done: rx, started: crate::now_ms(), steps: None };
+        let job = ControlJob { label: label(self, id), req, work: Work::Answer { inspection, drawn: drawing.then_some(drawn) }, done: rx, started: crate::now_ms(), steps: None };
         match within_wait(self, &job.done) {
             Some(reply) => self.answered(job, reply),
             None => {
                 // Stopped, an export's worker may still write its file; a reading writes none.
-                job.req.ticket.computing(ANSWERED_ON_A_COPY.contains(&id));
+                job.req.ticket.computing(writes_a_file(id));
                 self.control_answering.push(job);
             }
         }
@@ -724,6 +742,12 @@ impl SolveApp {
             let _ = job.req.reply.send(stopped_reply(&job.label, true));
             return;
         }
+        // The views its copy drew, for the sheet page and the next read.
+        if let Work::Answer { drawn: Some(drawn), .. } = &job.work
+            && let Ok(drawn) = drawn.try_recv()
+        {
+            solidcraft_engine::drawing_scene::keep_drawn_on_a_copy(&mut self.session, drawn);
+        }
         let mut reply = reply.unwrap_or_else(|| json!({"ok": false, "error": format!("`{}` ended without a reply", job.label)}));
         // Inspection runs on a scratch session. Retain its inert registration so namespaced
         // entries resolve on the live session without loading or executing code on the window.
@@ -733,7 +757,7 @@ impl SolveApp {
             && let (Some(id), Some(path)) = (reply.pointer("/result/manifest/id").and_then(Value::as_str), params.get("path").and_then(Value::as_str))
         {
             let current = match job.work {
-                Work::Answer { inspection: Some((uid, version)) } if uid == self.session.uid => {
+                Work::Answer { inspection: Some((uid, version)), .. } if uid == self.session.uid => {
                     let key = (uid, id.to_owned());
                     if self.plugin_inspection_versions.get(&key).is_some_and(|latest| *latest > version) {
                         false
@@ -750,7 +774,7 @@ impl SolveApp {
                 reply = json!({"ok":false,"error":self.tr("ui.plugin_context_changed")});
             }
         }
-        let export = executed(&job.req.params).and_then(|(command, _)| spec_id(command)).is_some_and(|id| ANSWERED_ON_A_COPY.contains(&id));
+        let export = executed(&job.req.params).and_then(|(command, _)| spec_id(command)).is_some_and(writes_a_file);
         if reply["ok"] == true && export {
             let language = solidcraft_ui_text::Locale::for_language(&self.preferences.language);
             self.session.echo(language.format("ui.command_done", &[("command", job.label.as_str())]));
@@ -975,7 +999,7 @@ mod tests {
         // The worker never answers: the batch stays where the test puts it.
         let (_worker, done) = std::sync::mpsc::channel();
         h.app.control_job =
-            Some(ControlJob { req, work: Work::Answer { inspection: None }, done, started: 0.0, label: String::new(), steps: Some(steps.clone()) });
+            Some(ControlJob { req, work: Work::Answer { inspection: None, drawn: None }, done, started: 0.0, label: String::new(), steps: Some(steps.clone()) });
         let rows = |h: &mut crate::scenario::Harness| {
             let listed = crate::operations::control(&mut h.app, &json!({})).unwrap();
             listed["operations"].as_array().unwrap().clone()
@@ -1001,7 +1025,7 @@ mod tests {
         let (req, _reply) = ControlRequest::new("engine.batch", mixed);
         let (_worker, done) = std::sync::mpsc::channel();
         h.app.control_job =
-            Some(ControlJob { req, work: Work::Answer { inspection: None }, done, started: 0.0, label: String::new(), steps: Some(steps.clone()) });
+            Some(ControlJob { req, work: Work::Answer { inspection: None, drawn: None }, done, started: 0.0, label: String::new(), steps: Some(steps.clone()) });
         steps.now.store(1, Ordering::Relaxed);
         let rows = rows(&mut h);
         assert_eq!(rows[0]["steps"], json!({"done": 0, "total": 3}));

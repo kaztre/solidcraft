@@ -215,6 +215,8 @@ that sees the sketch face on) and extrude distances. A box's, cylinder's or hole
   `empty_field`, `not_ballooned` or `outside_sheet`; `coverage: [{feature, name, state}]` with
   `covered`, `not_covered`, `unknown` or `not_applicable`. A feature that is `not_covered` is drawn
   but has no dimension or note pointing at it.
+  Name the `sheet` you are working on: a check of every sheet draws every view of every sheet,
+  which takes minutes when one of them shows a whole assembly. Check the whole drawing once, last.
 - `drawing.status`: each view's and dimension's state. Without the app's sheet page (headless, the
   CLI) views stay `out_of_date`; exports and `drawing.scene` still draw them whole.
 - `drawing.scene {"sheet": name}`: everything on the sheet with where it sits (`objects[].bounds_mm`);
