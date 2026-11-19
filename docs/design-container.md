@@ -118,8 +118,11 @@ Engine Save/Save As write the evaluated model with the design by default
 `cache/bodies.bin`. Plain JSON, recovery/autosave and browser downloads do not
 carry it. Saving never forces placement, evaluation or tessellation: the model is
 the session's own evaluation, and only when it is the evaluation of the document
-being saved (`Model::is_current`). An active sketch or feature errors leave the
-cache out; the design saves as before. A component moved and not captured yet
+being saved (`Model::is_current`). An active sketch leaves the cache out; the
+design saves as before. A feature that failed is kept with its error (and a sketch's
+lost projections), so a design with a failing feature still opens from its cache
+showing the same failure; only a failure that is the kernel's own (a panic it caught)
+or came while the evaluation was being stopped leaves the cache out. A component moved and not captured yet
 stops the save instead, naming it: capture or revert the move first (#9736). A cache
 over its budgets keeps fewer states (below) and is left out only when not even
 the final state fits.
@@ -163,7 +166,7 @@ Before #9170 one mesh body left the cache out for the whole model. As for a B-re
 mesh body is kept only when its slice reads back as the same vertices, bit for bit, the
 same triangles, colour and paint; the picture shown while opening draws its triangles.
 
-`cache/model.json` records `solidcraft-model-cache/10`, the producer revision
+`cache/model.json` records `solidcraft-model-cache/11`, the producer revision
 `solidcraft-truck-adapter/4`, the application version, the build (source commit,
 CPU architecture and OS), the evaluation source (below, with the CPU architecture
 and OS), the geometry kernel that computed it (`solidcore`; earlier builds could write `smlib`, a cache this build evaluates again), the SHA-256 of the exact `document.json` (whose blob references pin every

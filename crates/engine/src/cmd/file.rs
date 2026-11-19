@@ -1713,9 +1713,13 @@ fn missing_save_cache(s: &Session, format: &str, cache: bool, bytes: &[u8]) -> O
     if present {
         return None;
     }
-    let reason = if let Some(result) = s.model.results.iter().find(|r| r.error.is_some()) {
+    let reason = if let Some(result) = s.model.results.iter().find(|r| r.unsaved_error()) {
         let feature = s.doc.feature(result.id).map_or("a timeline feature", |f| f.name.as_str());
-        format!("feature {feature} has an error")
+        if result.internal {
+            format!("feature {feature} failed inside the modelling kernel")
+        } else {
+            format!("feature {feature} failed while its rebuild was being stopped")
+        }
     } else if s.active_sketch.is_some() {
         "a sketch is being edited".into()
     } else if !s.pending_moves.is_empty() {
@@ -3723,21 +3727,25 @@ mod tests {
     /// make the next open rebuild the timeline. Plain JSON and explicit cache:false are
     /// unchanged; an ordinary cache is still silent (#18815).
     #[test]
-    fn saving_a_failed_feature_reports_missing_cache_without_losing_the_design() {
+    fn saving_a_failed_feature_keeps_the_model_cache_and_opens_with_its_error() {
         let path = std::env::temp_dir().join(format!("solidcraft-cache-error-{}.sc", std::process::id()));
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length":20,"width":20,"height":20,"name":"Block"})).unwrap();
         s.execute("solid.box", &json!({"length":5,"width":5,"height":5,"corner":[0,0,15],"operation":"cut","name":"Pocket"})).unwrap();
         s.execute("solid.fillet", &json!({"edges":[[2.5,5,15]],"radius":1,"name":"Round"})).unwrap();
         s.execute("timeline.suppress", &json!({"feature":"Pocket","suppressed":true})).unwrap();
-        assert!(s.model.results.iter().any(|r| r.error.is_some()), "the suppressed Pocket leaves Round invalid");
+        let error = s.model.results.iter().find_map(|r| r.error.clone()).expect("the suppressed Pocket leaves Round invalid");
+        // A failing feature no longer leaves the model out: every open of such a design evaluated
+        // its whole timeline again (four and a half minutes for a 301-feature design).
         let saved = s.execute("file.save", &json!({"path":path})).unwrap();
-        let notice = saved["cache_not_saved"].as_str().expect("a failing feature must be reported");
-        assert!(notice.contains("Round") && notice.contains("error"), "{notice}");
-        assert_eq!(saved["warnings"][0], notice);
+        assert!(saved.get("cache_not_saved").is_none(), "{saved}");
         let bytes = std::fs::read(&path).unwrap();
-        assert!(!solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(&bytes)).unwrap().has_model_cache());
+        assert!(solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(&bytes)).unwrap().has_model_cache());
         assert_eq!(solidcraft_io::read_design(&bytes).unwrap().to_json(), s.doc.to_json(), "the authoritative design is saved");
+        let mut opened = Session::default();
+        opened.execute("doc.open", &json!({"path":path})).unwrap();
+        assert_eq!(opened.model.last_recomputed, 0, "opened from the saved model");
+        assert_eq!(opened.model.results.iter().find_map(|r| r.error.clone()), Some(error), "with the same failure");
 
         let disabled = s.execute("file.save", &json!({"cache":false})).unwrap();
         assert!(disabled.get("cache_not_saved").is_none());

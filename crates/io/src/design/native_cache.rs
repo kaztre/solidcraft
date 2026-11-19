@@ -7,7 +7,9 @@ use super::*;
 use sha2::{Digest, Sha256};
 use solidcraft_doc::{ModelState, SavedModel};
 
-const FORMAT: &str = "solidcraft-model-cache/10";
+/// 11: a feature that failed is kept with its error (and a sketch's lost projections), so a
+/// design with a failing feature opens from its cache; a reader of 10 would take it for a success.
+const FORMAT: &str = "solidcraft-model-cache/11";
 const PRODUCER: &str = "solidcraft-truck-adapter/4";
 const MANIFEST: &str = "cache/model.json";
 const PAYLOAD: &str = "cache/bodies.bin";

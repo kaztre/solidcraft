@@ -537,6 +537,29 @@ fn an_adopted_model_mirrors_at_the_designs_own_pose() {
     assert_model_as_evaluated_afresh(&s);
 }
 
+/// A saved model keeps the pose its pose-only mirror was made at: opened at that same pose,
+/// nothing is evaluated (a design whose mirror of placed bodies came before 141 features
+/// evaluated all of them again on every open).
+#[test]
+fn an_adopted_model_at_the_saved_pose_evaluates_nothing() {
+    let mut s = Session::default();
+    moved_arm(&mut s);
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"type": "revolute", "name": "Pan", "a": 0, "b": "Arm", "at": {"occurrence": 0, "point": [0, 0, 0], "z": [0, 0, 1]}}),
+    );
+    run(&mut s, "solid.mirror", json!({"bodies": ["ArmBody"], "plane": "YZ"}));
+    run(&mut s, "solid.box", json!({"corner": [0, -100, 0], "length": 10, "width": 10, "height": 10, "body_name": "Later"}));
+    let saved = s.model.saved(&s.doc).unwrap();
+    s.model = solidcraft_doc::Model::adopt(&s.doc, &saved).unwrap();
+    assert_eq!(s.model.recomputed, 0, "taken from the file, mirror and all");
+    assert_model_as_evaluated_afresh(&s);
+    let before = s.model.recomputed;
+    s.model.evaluate(&s.doc);
+    assert_eq!(s.model.recomputed, before, "the adopted model is current");
+}
+
 /// A cut revolved about an edge of a mirrored copy turns about it where the copy now is, when
 /// a joint drive moves the copy: the axis is a pick of the model, not a body by name (#12139).
 /// (Not checked against a fresh evaluation: one without the cache finds no edge at the pick.)

@@ -77,6 +77,31 @@ fn keys_list<'a>(set: &'a Json, key: &str) -> Result<&'a Vec<Json>> {
     set.get(key).and_then(Json::as_array).filter(|l| l.len() <= MAX_ITEMS).ok_or_else(|| bad("saved model: sketch keys"))
 }
 
+/// A failed sketch's lost projections as a record keeps them ([`Model::saved`]).
+fn lost_projections(v: &Json) -> Result<Vec<crate::LostProjection>> {
+    let text = |l: &Json, key: &str| l.get(key).and_then(Json::as_str).filter(|s| s.len() <= MAX_TEXT).map(str::to_owned);
+    let ids = |l: &Json, key: &str| -> Option<Vec<String>> {
+        l.get(key)?.as_array().filter(|a| a.len() <= MAX_ITEMS)?.iter().map(|id| id.as_str().map(str::to_owned)).collect()
+    };
+    v.as_array()
+        .filter(|a| a.len() <= MAX_ITEMS)
+        .ok_or_else(|| bad("saved model: lost projections"))?
+        .iter()
+        .map(|l| {
+            let one = || {
+                Some(crate::LostProjection {
+                    link: text(l, "link")?,
+                    what: text(l, "what")?,
+                    curves: ids(l, "curves")?,
+                    points: ids(l, "points")?,
+                    name: text(l, "name")?,
+                })
+            };
+            one().ok_or_else(|| bad("saved model: lost projections"))
+        })
+        .collect()
+}
+
 fn bad(what: &str) -> DocError {
     DocError::Invalid(what.into())
 }
@@ -390,8 +415,10 @@ impl Writer {
 }
 
 impl Model {
-    /// The model as a design file keeps it: `None` unless it is `doc`'s evaluation without an
-    /// error and `doc` keeps no names saved before format 14. Works out
+    /// The model as a design file keeps it: `None` unless it is `doc`'s evaluation and `doc` keeps
+    /// no names saved before format 14. A feature that failed is kept with its error, so a design
+    /// opens from its file with the failure shown; one whose error is the kernel's own (a panic it
+    /// caught) or came while its evaluation was being stopped leaves the model out. Works out
     /// the face names not asked for yet (a saved model keeps them as worked out).
     ///
     /// An import whose SMLib check of its parts is still running is saved with what the check
@@ -405,7 +432,7 @@ impl Model {
     /// [`Self::saved`] without waiting for the imports' checks: the records hold what each import
     /// found before its check, and [`PendingChecks::settle`] adds what the check finds.
     pub fn saved_now(&self, doc: &Document) -> Option<(SavedModel, PendingChecks)> {
-        if self.results.is_empty() || self.results.iter().any(|r| r.error.is_some()) || !self.is_current(doc) || has_legacy_names(doc) {
+        if self.results.is_empty() || self.results.iter().any(FeatureResult::unsaved_error) || !self.is_current(doc) || has_legacy_names(doc) {
             return None;
         }
         kernel::guard("save the model", || {
@@ -420,6 +447,20 @@ impl Model {
                 let mut f = json!({"id": r.id, "fingerprint": hex(r.fingerprint), "ms": r.ms, "skipped": r.skipped, "state": state});
                 if let Some(w) = &r.warning {
                     f["warning"] = json!(w);
+                }
+                if let Some(e) = &r.error {
+                    f["error"] = json!(e);
+                }
+                // Where the parts a mirror of placed bodies copies were: opening compares it with
+                // the design's placements instead of evaluating the mirror again.
+                if let Some(pose) = self.poses.get(&r.id) {
+                    f["pose"] = json!(hex(*pose));
+                }
+                if let Some(lost) = &r.lost_projections {
+                    f["lost_projections"] = lost
+                        .iter()
+                        .map(|l| json!({"link": l.link, "what": l.what, "curves": l.curves, "points": l.points, "name": l.name}))
+                        .collect();
                 }
                 if let Some(report) = &r.import_report {
                     f["import_report"] = serde_json::to_value(report.as_ref()).map_err(|e| kernel::KernelError::Invalid(e.to_string()))?;
@@ -1010,6 +1051,9 @@ impl Model {
         let mut exact = true;
         let mut prev = 0;
         let mut results = Vec::with_capacity(features.len());
+        // Each mirror of placed bodies whose parts are where they were when it was saved.
+        let mut poses = HashMap::new();
+        let mut posed = false;
         let mut construction = HashMap::new();
         let mut prepared_states = std::collections::HashSet::new();
         for (i, (f, r)) in doc.features.iter().zip(features).enumerate() {
@@ -1022,6 +1066,16 @@ impl Model {
                 return Err(bad("saved model: the document changed"));
             }
             let ms = r.get("ms").and_then(Json::as_f64).filter(|ms| ms.is_finite()).ok_or_else(|| bad("saved model: time"))?;
+            let skipped = r.get("skipped").and_then(Json::as_bool).ok_or_else(|| bad("saved model: skipped"))?;
+            if !skipped && pose_only(f) {
+                let now = placement_digest(doc, f, Some(&before));
+                match r.get("pose").map(unhex).transpose()? {
+                    Some(saved) if exact && saved == now => {
+                        poses.insert(f.id, now);
+                    }
+                    _ => posed = true,
+                }
+            }
             // A file without room for every state keeps some features without one (#3220).
             let state = r.get("state").map(|s| index(Some(s), states.len())).transpose()?;
             if let Some(at) = state
@@ -1043,10 +1097,11 @@ impl Model {
                 }
             }
             let state = state.map(|at| states.get(at).cloned().ok_or_else(|| bad("saved model: state"))).transpose()?;
+            let lost_projections = r.get("lost_projections").map(lost_projections).transpose()?.map(Arc::new);
             let result = FeatureResult {
                 id: f.id,
                 name: f.name.clone(),
-                error: None,
+                error: r.get("error").map(|e| text(Some(e))).transpose()?,
                 internal: false,
                 warning: r.get("warning").map(|w| text(Some(w))).transpose()?,
                 import_report: r
@@ -1054,12 +1109,13 @@ impl Model {
                     .map(|v| serde_json::from_value::<kernel::ImportReport>(v.clone()).map(Arc::new).map_err(|_| bad("saved model: import report")))
                     .transpose()?,
                 repair: None,
-                lost_projections: None,
+                lost_projections,
                 ms,
-                skipped: r.get("skipped").and_then(Json::as_bool).ok_or_else(|| bad("saved model: skipped"))?,
+                skipped,
                 stale: false,
                 fingerprint: prev,
                 unkept: state.is_none(),
+                cut_short: false,
                 state: state.unwrap_or_else(|| before.clone()),
             };
             if !result.skipped {
@@ -1068,11 +1124,11 @@ impl Model {
             }
             results.push(result);
         }
-        let mut model = Model { results, param_errors, import_digests, context: ctx, frame_bodies, validation, ..Model::default() };
+        let mut model = Model { results, param_errors, import_digests, context: ctx, frame_bodies, validation, poses, ..Model::default() };
         let unkept = model.results.iter().filter(|r| r.unkept).count();
         // A pose-only feature's fingerprint leaves its pose out, so its saved result may be from
-        // another pose than `doc`'s: evaluated again, with what reads none of it kept (#12139).
-        let posed = doc.features.iter().zip(&model.results).any(|(f, r)| !r.skipped && pose_only(f));
+        // another pose than `doc`'s: evaluated again, with what reads none of it kept (#12139),
+        // unless the file kept the pose it was evaluated at and the design's placements give it.
         if unkept > 0 || posed {
             // The features whose state the file did not keep, each evaluated again from the state
             // before it: nothing else in the model is missing then.
@@ -1088,7 +1144,7 @@ impl Model {
         // finds it again rather than evaluating the feature anew.
         let mut before = Arc::new(ModelState::default());
         if let Ok(mut cache) = model.cache.lock() {
-            for (f, r) in doc.features.iter().zip(&model.results).filter(|(_, r)| !r.skipped && r.error.is_none()) {
+            for (f, r) in doc.features.iter().zip(&model.results).filter(|(_, r)| !r.skipped) {
                 // A pose-only feature's fingerprint leaves its pose out, so its saved result may be
                 // from another pose than `doc`'s: it is no result for `doc`'s key (#12139).
                 if pose_only(f) {
@@ -1101,11 +1157,11 @@ impl Model {
                 cache.states.put(
                     cache_key(f, r.fingerprint, local, ctx, &before),
                     CachedEval {
-                        error: None,
+                        error: r.error.clone(),
                         warning: r.warning.clone(),
                         import_report: r.import_report.clone(),
                         repair: r.repair.clone(),
-                        lost_projections: None,
+                        lost_projections: r.lost_projections.clone(),
                         ms: r.ms,
                         state: r.state.clone(),
                     },

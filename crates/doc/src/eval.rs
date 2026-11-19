@@ -1649,8 +1649,20 @@ pub struct FeatureResult {
     /// [`Model::adopt`] does before the model is used.
     #[serde(skip)]
     unkept: bool,
+    /// Worked out while its evaluation was being stopped: an error may be the stop's, not the
+    /// feature's, so a saved model never keeps it ([`Model::saved`]).
+    #[serde(skip)]
+    cut_short: bool,
     #[serde(skip)]
     pub state: Arc<ModelState>,
+}
+
+impl FeatureResult {
+    /// A failure a saved model can't keep: the kernel's own error (a panic it caught), or one that
+    /// came while the evaluation was being stopped ([`Model::saved`]).
+    pub fn unsaved_error(&self) -> bool {
+        self.error.is_some() && (self.internal || self.cut_short)
+    }
 }
 
 /// Incremental evaluator: holds the state after every feature.
@@ -3911,6 +3923,7 @@ impl Model {
                         stale: false,
                         fingerprint: fp,
                         unkept: false,
+                        cut_short: false,
                         state: state.clone(),
                     });
                     continue;
@@ -3946,6 +3959,7 @@ impl Model {
                         stale: false,
                         fingerprint: fp,
                         unkept: false,
+                        cut_short: false,
                         state: state.clone(),
                     });
                     continue;
@@ -3993,6 +4007,7 @@ impl Model {
                         stale: false,
                         fingerprint: fp,
                         unkept: false,
+                        cut_short: false,
                         state: state.clone(),
                     });
                     continue;
@@ -4264,6 +4279,7 @@ impl Model {
                     stale: false,
                     fingerprint: fp,
                     unkept: false,
+                    cut_short: watched.cancelled(),
                     state: state.clone(),
                 });
             }

@@ -1844,6 +1844,37 @@ fn an_invalid_grouped_thread_face_keeps_the_starting_model() {
     assert!(model.state().bodies[0].body.same_shape(&before.bodies[0].body));
 }
 
+/// A design with a failing feature keeps its saved model (a 301-feature design with three failing
+/// features evaluated on every open, four and a half minutes): opening takes every result from
+/// the file, the failure with its message, and evaluates nothing; an edit after it reuses the
+/// failure instead of evaluating the feature again.
+#[test]
+fn a_failing_feature_keeps_the_saved_model_and_its_error() {
+    let (mut doc, id) = grouped_thread_document(false);
+    if let FeatureKind::Thread { additional_faces, .. } = &mut doc.feature_mut(id).unwrap().kind {
+        additional_faces.push(FacePick(Vec3::new(1000.0, 0.0, 0.0)));
+    }
+    let corner = point_expr(Vec3::new(50.0, 0.0, 0.0));
+    let kind = FeatureKind::Box { corner, length: "5".into(), width: "5".into(), height: "5".into(), operation: Operation::NewBody, centred: false };
+    let after = doc.add_feature(kind, None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let error = model.result(id).unwrap().error.clone().expect("the thread fails");
+    assert!(!model.result(id).unwrap().unsaved_error());
+    let saved = model.saved(&doc).expect("a failing feature leaves the model saved");
+    let mut reopened = Model::adopt(&doc, &saved).unwrap();
+    assert_eq!(reopened.last_recomputed, 0, "nothing is evaluated on opening");
+    assert_eq!(reopened.result(id).unwrap().error.as_ref(), Some(&error));
+    assert!(reopened.result(after).unwrap().error.is_none());
+    assert_eq!(reopened.state().bodies.len(), model.state().bodies.len());
+    if let FeatureKind::Box { height, .. } = &mut doc.feature_mut(after).unwrap().kind {
+        *height = "6".into();
+    }
+    reopened.evaluate(&doc);
+    assert_eq!(reopened.last_recomputed, 1, "only the edited box");
+    assert_eq!(reopened.result(id).unwrap().error.as_ref(), Some(&error));
+}
+
 /// Evaluate just the grouped thread, after its unchanged support geometry is already cached.
 fn grouped_thread_work(mode: kernel::Validation, refuse_trim: bool, continuous_flanks: bool) -> (Counts, Model, u64) {
     let (mut doc, id) = grouped_thread_document(true);
