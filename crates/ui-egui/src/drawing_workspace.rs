@@ -1141,6 +1141,27 @@ mod tests {
         assert!(h.widget("Inspection sheet").is_none());
     }
 
+    /// `drawing.sheet.show` puts the named sheet on the sheet page, entering Drawing for it: an
+    /// agent's new sheet was made behind whichever sheet the page showed, so the person saw none
+    /// of it.
+    #[test]
+    fn show_sheet_puts_the_named_sheet_on_the_page() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        h.app.preferences.drawings_preview = true;
+        let first = h.app.run("drawing.create", serde_json::json!({})).unwrap()["sheets"][0]["id"].as_str().unwrap().to_string();
+        let added = h.app.run("drawing.sheet.add", serde_json::json!({"name":"Inspection sheet"})).unwrap()["sheet"].as_str().unwrap().to_string();
+        assert!(!active(&h.app));
+        let shown = h.app.run("drawing.sheet.show", serde_json::json!({"sheet":"Inspection sheet"})).unwrap();
+        assert_eq!(shown["sheet"], added.as_str());
+        assert!(active(&h.app), "the window is in Drawing");
+        assert_eq!(active_sheet(&h.app).map(solidcraft_engine::doc::ids::encode), Some(added));
+        h.app.run("drawing.sheet.show", serde_json::json!({"sheet":first})).unwrap();
+        assert_eq!(active_sheet(&h.app).map(solidcraft_engine::doc::ids::encode), Some(first));
+        assert!(h.app.run("drawing.sheet.show", serde_json::json!({"sheet":"No such sheet"})).is_err());
+    }
+
     #[test]
     fn sheet_menu_deletes_the_sheet_it_belongs_to_after_confirmation() {
         let mut h = Harness::new();

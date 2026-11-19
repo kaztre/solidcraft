@@ -6,32 +6,33 @@ description: Use when making or changing a 2D engineering drawing of a SolidCraf
 # SolidCraft drawings
 
 ## Overview
-A drawing is sheets of views of the model, with dimensions, notes and a title block that read the model. Plan the sheet as numbers (paper, views, every dimension and where its line goes), build it in three `batch` calls, then check it with `drawing.check` and look at it. Command shapes, a worked example and traps: `reference.md`.
+A drawing a machinist can make the part from, without the model and without asking. Every size is a dimension on a view; text is only what no dimension can say. Plan the sheet as numbers, build it in batches, then look at it and fix it until nothing overlaps. Command shapes, drafting rules, a recipe for turned parts, a worked example and traps: `reference.md`. Read it first.
 
 ## Before the first call
-1. `skill_reference {"skill":"solidcraft-drawings"}`; elsewhere read `reference.md`.
-2. `drawing.list {}`: change the user's drawing rather than adding a second.
-3. `inspect_design {"measure":true,"sketches":false}` for each body's box. List what needs a dimension: overall sizes, then every hole, slot and step by size and position from one datum corner.
-4. The Drawings menu is a preview the user may have switched off; the commands work either way.
+1. `skill_reference {"skill":"solidcraft-drawings"}`.
+2. `drawing.list {}`: improve the user's drawing rather than adding one. One part per sheet.
+3. `body_topology` with `faces: "cylinders"` for each body drawn: its diameters, lengths and the points that pick them.
+4. Tolerances, fits, finishes and part numbers come from the user or the project's files (`project_search`). Never invent one, and never write "provisional": ask, or leave it out and say so.
 
 ## Build
-1. **Sheet:** `drawing.create` (ISO A3, third angle) opens the drawing; `drawing.view.standard` with `gap_mm` 35 places front, top, right and iso at a fitted scale. Add section, auxiliary or flat views where a feature hides.
-2. **Title block:** `drawing.sheet.set` with `documents` (the source id `drawing.create` returned, component 0) fills the title, material and mass; `drawing.properties.set` the part number and organisation; `drawing.revision.add` the date and initials.
-3. **Dimensions:** view ids are random, so read them from the first batch. `drawing.dimension.add` by model points, each on the view that shows it true and face on, `decimals` to suit the tolerance. Never on the iso view.
-4. **Place:** a new dimension sits near what it measures, often inside the outline. `drawing.view.inspect` gives a view's `boundary_mm`; `drawing.dimension.edit` with `line_through_mm` moves each line outside it, the smaller ones 10 mm out, the overall ones 20 mm.
-5. **Notes:** `drawing.note.add`; `at` is the note's centre, inside the border.
+1. **Sheet:** `drawing.sheet.add` with `size` and `orientation` (a new sheet copies the last one's paper), then `drawing.sheet.show` so the user sees it.
+2. **Views:** the fewest that show every feature. Main view as the part is made (a turned part's axis horizontal), an end or section view only for what the main view hides, a small isometric in a free corner. One scale that fills about half the sheet's width.
+3. **Title block:** `drawing.sheet.set` with `documents`; title and number in the block, never as a heading on the sheet.
+4. **Dimensions:** each size once, on the view that shows it true. Diameters with the `cylinder` kind (reads Ø), lengths from one datum face, the overall length outside them. `decimals` to suit the tolerance.
+5. **Place:** every dimension line outside its view's `boundary_mm` (`drawing.dimension.edit` with `line_through_mm`): first row 10 mm out, each further row 10 mm more, a diameter beside the feature it sizes.
+6. **Callouts:** a thread, chamfer or finish is a note with a leader: `anchor` `{edge}` at an edge's `mid` from `model.edges`. General notes are one numbered note near the title block.
 
-## Verify
-- `drawing.check {}` lists what is lost, outside the sheet or empty; `coverage` names features nothing points at. Fix all but title fields the user hasn't given.
-- Look: `screenshot {"source":"window"}` while the sheet is on screen, or tell the user to export a PNG.
-- Export only when asked: `drawing.export` with `all_sheets` and `pdf` writes every sheet, printed at actual size.
+## Verify, then fix
+- `drawing.check {}`: nothing lost, failed or off the sheet.
+- `drawing.scene` lists `objects` with `bounds_mm`: no note or dimension text may overlap another or a view.
+- `drawing.sheet.show`, then `screenshot {"source":"window"}`. Read it as the machinist: can every feature be made and measured? Fix and look again.
 
 ## Red flags
 
 | Thought | Do instead |
 |---|---|
-| "Model Dimensions brings every size in" | It brings sketch dimensions and extrude distances only; a box, cylinder or hole needs `drawing.dimension.add`. |
-| "`offset_mm` puts it outside" | It counts from the midpoint of the measured points; use `line_through_mm`. |
-| "The reply says ok, so it looks right" | Check, then look at the sheet. |
-| "Two decimals everywhere" | Match the general tolerance: whole millimetres show `decimals` 0. |
-| "Make a new drawing to fix one" | Edit the open drawing; ids stay, the user's work stays. |
+| "List the sizes as notes beside the view" | A size is a dimension on the view. A list of typed sizes is not a drawing. |
+| "Add a heading, a status line, a view caption" | The title block says it. Leave the sheet to the part. |
+| "`offset_mm` puts it outside" | It counts from the midpoint of what is measured; use `line_through_mm`. |
+| "The reply says ok" | Look at the sheet. Overlaps and crowding show only there. |
+| "This tolerance is typical" | Ask. A guessed tolerance scraps parts. |

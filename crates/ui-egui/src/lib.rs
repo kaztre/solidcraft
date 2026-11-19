@@ -1700,6 +1700,16 @@ impl SolveApp {
             Some("component.edit_in_place") => r.and_then(|v| edit_in_place::command_ran(self, &v).map(|queued| with_queued(v, queued))),
             Some("component.finish_edit") => r.and_then(|v| edit_in_place::finish_command(self).map(|queued| with_queued(v, queued))),
             Some(view) if view.starts_with("tab.view.") => r.and_then(|v| documents::view_command(self, view, v)),
+            // The window shows the sheet the command named (fork): an agent's new sheet was made
+            // behind whichever sheet the page happened to show.
+            Some("drawing.sheet.show") => r.inspect(|v| {
+                if let Some(sheet) = v["sheet"].as_str().and_then(solidcraft_engine::doc::ids::decode) {
+                    if drawing_workspace::enabled(self) && !drawing_workspace::active(self) {
+                        let _ = workspace::enter(self, "drawing");
+                    }
+                    drawing_sheet_page::select_sheet(self, sheet);
+                }
+            }),
             _ => r,
         };
         // A grant taken back here that the shared store still holds is not taken back: say so.

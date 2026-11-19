@@ -39,6 +39,7 @@ mod threads;
 
 pub use exact::{Fallback, PreparedBodies};
 pub use hatch::{BodyHatch, CutFaces, FLATTEN_MM, Hatching, hatches};
+pub(crate) use lines::drawable;
 pub use lines::{CHORD_MM, CHORD_RANGE, LineRequest, Lines, MIN_MODEL_CHORD_MM, Made, Piece, Stats, ViewLine, lines, paper_group, paper_lines};
 pub use threads::ThreadLine;
 

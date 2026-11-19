@@ -218,6 +218,22 @@ pub struct SheetDeleteParams {
     pub contents: Option<String>,
 }
 
+/// Show a sheet on the window's sheet page (fork).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SheetShowParams {
+    /// The sheet, by id or name.
+    #[serde(deserialize_with = "sheet_ref")]
+    pub sheet: String,
+}
+
+/// The sheet now shown.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetShown {
+    pub sheet: String,
+    pub name: String,
+}
+
 /// One of the drawing's sheets.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct SheetName {

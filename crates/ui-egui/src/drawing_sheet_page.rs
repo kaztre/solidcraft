@@ -848,9 +848,14 @@ impl Marks {
                         continue;
                     }
                     let width = ((width_mm * at.scale) as f32).max(hair);
-                    let points: Vec<Pos2> = points.iter().map(|p| at.screen(*p)).collect();
+                    let mut points: Vec<Pos2> = points.iter().map(|p| at.screen(*p)).collect();
+                    if *closed && let Some(first) = points.first().copied() {
+                        points.push(first);
+                    }
                     let stroke = Stroke::new(width, ink);
-                    painter.add(if *closed { egui::Shape::closed_line(points, stroke) } else { egui::Shape::line(points, stroke) });
+                    for run in without_sharp_corners(&points) {
+                        painter.add(egui::Shape::line(run, stroke));
+                    }
                 }
                 Mark::Fill { triangles, outlines, bounds } => {
                     if !bounds.meets(&visible) {
@@ -864,8 +869,13 @@ impl Marks {
                         mesh.add_triangle(base, base + 1, base + 2);
                     }
                     for outline in outlines {
-                        let points: Vec<Pos2> = outline.iter().map(|p| at.screen(*p)).collect();
-                        painter.add(egui::Shape::closed_line(points, Stroke::new(hair * 0.5, ink)));
+                        let mut points: Vec<Pos2> = outline.iter().map(|p| at.screen(*p)).collect();
+                        if let Some(first) = points.first().copied() {
+                            points.push(first);
+                        }
+                        for run in without_sharp_corners(&points) {
+                            painter.add(egui::Shape::line(run, Stroke::new(hair * 0.5, ink)));
+                        }
                     }
                 }
                 Mark::Picture(rect) => {
@@ -881,6 +891,34 @@ impl Marks {
             painter.add(egui::Shape::mesh(mesh));
         }
     }
+}
+
+/// `points` as the runs between its sharp corners, each run ending on the corner the next starts
+/// from. A stroke's corners are mitred: where a line folds back on itself (the crest of a modelled
+/// thread seen side-on, a hatch's turn) the mitre is a spike many times the line's length, which
+/// crossed the whole sheet page. A run has no corner sharper than a right angle, whose mitre is
+/// 1.4 line widths at most.
+fn without_sharp_corners(points: &[Pos2]) -> Vec<Vec<Pos2>> {
+    let mut runs: Vec<Vec<Pos2>> = Vec::new();
+    let mut run: Vec<Pos2> = Vec::new();
+    for p in points {
+        if let [.., a, b] = run.as_slice() {
+            let (into, out) = (*b - *a, *p - *b);
+            if into.dot(out) < 0.0 {
+                let corner = *b;
+                runs.push(std::mem::take(&mut run));
+                run.push(corner);
+            }
+        }
+        // A point on the one before it turns nothing.
+        if run.last() != Some(p) {
+            run.push(*p);
+        }
+    }
+    if run.len() > 1 {
+        runs.push(run);
+    }
+    runs
 }
 
 enum Fault {

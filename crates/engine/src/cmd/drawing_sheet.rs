@@ -19,7 +19,9 @@ use solidcraft_geom::title_block::{self, TitleBlock};
 
 use super::CommandSpec;
 use crate::params::{bad, num, str_};
-use crate::schema::drawing_sheet::{SheetAddParams, SheetDeleteParams, SheetName, SheetReorderParams, SheetSetParams, SheetsResult};
+use crate::schema::drawing_sheet::{
+    SheetAddParams, SheetDeleteParams, SheetName, SheetReorderParams, SheetSetParams, SheetShowParams, SheetShown, SheetsResult,
+};
 use crate::schema::drawing_view::OutsideResult;
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -28,6 +30,7 @@ const ADD: TypedContract<SheetAddParams> = TypedContract::new();
 const SET: TypedContract<SheetSetParams> = TypedContract::new();
 const REORDER: TypedContract<SheetReorderParams> = TypedContract::new();
 const DELETE: TypedContract<SheetDeleteParams> = TypedContract::new();
+const SHOW: TypedContract<SheetShowParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.sheet.add", "Add Sheet", crate::checked!("drawing.sheet.add", add))
@@ -73,6 +76,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "sheet: id or name (a drawing keeps at least one); contents?: delete, to delete the views on it, their dimensions and \
              balloons, and the images and sheet sketches and fills on it, with it (without it a sheet with anything on it is refused, naming what) → the drawing's sheets. One undo step.",
+        ),
+    CommandSpec::new("drawing.sheet.show", "Show Sheet", crate::checked!("drawing.sheet.show", show))
+        .icon("list")
+        .in_drawing()
+        .noundo()
+        .doc_only()
+        .contract(&SHOW)
+        .output(output_schema_for::<SheetShown>)
+        .params(
+            "sheet: id or name → sheet, name. The window enters Drawing and shows that sheet on its sheet page, fitted, so a \
+             screenshot of the window shows it; without a window nothing changes. Never changes the drawing",
         ),
 ];
 
@@ -281,6 +295,14 @@ pub(super) fn contents_delete(cmd: &str, p: &Value, what: &str) -> Result<bool> 
         Some(v) if v.as_str() == Some("delete") => Ok(true),
         Some(_) => Err(bad(cmd, format!("`contents` is delete: {what}"))),
     }
+}
+
+fn show(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "drawing.sheet.show";
+    let d = s.drawing(cmd)?;
+    let at = sheet_at(cmd, d, p, "sheet")?;
+    let sheet = d.sheets.get(at).ok_or_else(|| bad(cmd, "`sheet` must be a sheet's id or name"))?;
+    serde_json::to_value(SheetShown { sheet: ids::encode(sheet.id), name: sheet.name.clone() }).map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {

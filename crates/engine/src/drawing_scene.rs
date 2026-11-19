@@ -1373,6 +1373,18 @@ struct Assembly {
     fills: Vec<FillState>,
 }
 
+/// `group` without the pieces of its strokes that have no length ([`drawable`]), and without the
+/// strokes that leaves empty.
+fn without_collapsed(group: &mut Group) {
+    group.items.retain_mut(|item| match item {
+        Item::Stroke { path, .. } => {
+            *path = path.iter().copied().filter_map(crate::drawing_view::drawable).collect();
+            !path.is_empty()
+        }
+        _ => true,
+    });
+}
+
 /// Why a group stayed out of a scene.
 enum LeftOut {
     TooManyRecords,
@@ -1393,6 +1405,11 @@ impl Assembly {
             return Err(LeftOut::TooManyRecords);
         }
         self.alone.groups.push(group());
+        if self.alone.validate().is_err() {
+            // A piece too short to keep two ends once it is moved to its place on the sheet draws
+            // nothing: it is left out, where it failed the whole view ("collapsed curve").
+            self.alone.groups.iter_mut().for_each(without_collapsed);
+        }
         if let Err(e) = self.alone.validate() {
             self.alone.groups.clear();
             self.alone.fonts.clear();

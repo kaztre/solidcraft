@@ -293,6 +293,26 @@ fn square(at: Vec2, side: f64) -> Loop2 {
     Loop2 { segs: (0..4).map(|i| Seg2::Line { a: p[i], b: p[(i + 1) % 4] }).collect() }
 }
 
+/// A line that folds back on itself is stroked as runs that end on the fold: mitred as one line,
+/// a thread's crests each threw a spike across the whole sheet page and over the toolbar.
+#[test]
+fn a_line_that_folds_back_is_stroked_in_runs_without_the_fold() {
+    let p = |x: f32, y: f32| egui::pos2(x, y);
+    // A thread seen side-on: up a flank, back down the next, at 4 degrees to each other.
+    let zigzag = [p(0.0, 0.0), p(1.0, 30.0), p(2.0, 0.0), p(3.0, 30.0), p(3.0, 30.0), p(40.0, 30.0)];
+    let runs = super::without_sharp_corners(&zigzag);
+    assert_eq!(runs, [vec![p(0.0, 0.0), p(1.0, 30.0)], vec![p(1.0, 30.0), p(2.0, 0.0)], vec![p(2.0, 0.0), p(3.0, 30.0), p(40.0, 30.0)]]);
+    for run in &runs {
+        for w in run.windows(3) {
+            assert!((w[1] - w[0]).dot(w[2] - w[1]) >= 0.0, "no corner sharper than a right angle: {run:?}");
+        }
+    }
+    // A gentle curve stays one run; one point draws nothing.
+    let curve = [p(0.0, 0.0), p(10.0, 1.0), p(20.0, 3.0), p(30.0, 6.0)];
+    assert_eq!(super::without_sharp_corners(&curve), [curve.to_vec()]);
+    assert!(super::without_sharp_corners(&[p(1.0, 1.0)]).is_empty());
+}
+
 /// A stroke, a dashed stroke, an arc and a fill with a hole each become what they are: the dashes
 /// at their lengths, the arc within the tolerance, the fill's triangles its area.
 #[test]

@@ -8,6 +8,108 @@ Paper positions are millimetres from the sheet's lower-left corner; model points
 the design's frame. `describe_command` gives any command's full docs; `list_commands {"prefix":"drawing."}`
 lists them all.
 
+## What a professional sheet is
+Read this before placing anything. The commands below only make marks; these rules make a drawing.
+
+**The test.** Someone who has never seen the model makes the part from the sheet alone, and an
+inspector checks it from the same sheet. Every feature has its size and its position, once.
+
+**Views**
+- One part per sheet. The fewest views that show every feature: a turned part needs its side view
+  and at most an end view; a plate its face and an edge; a prismatic part three.
+- The main view shows the part as it is made or as it sits: a turned part's axis horizontal, the
+  largest diameter towards the left chuck end or as the user's other drawings have it.
+- What the main view hides (a bore, an internal thread, a pocket's depth) is shown by a section,
+  not by hidden lines with dimensions on them. Hidden lines (`visual_style: "visible_hidden"`) are
+  for understanding only.
+- A small isometric (half the main scale or less) in a free corner helps the reader. It carries no
+  dimensions and never touches another view.
+- Pick the scale so the main view takes about half the sheet's width, from 1:1, 2:1, 5:1, 10:1 or
+  1:2, 1:5, 1:10. Every orthographic view of the part has the same scale. Leave 35 mm or more
+  between views and 25 mm to the border for dimensions.
+- A projected view left where `drawing.view.projected` puts it stays lined up and unlabelled. Placed
+  by hand (`place: {at}`) it gets a "VIEW B / SCALE" label that then needs room: prefer the default,
+  and a smaller scale or a larger sheet when it doesn't fit.
+
+**Dimensions**
+- A size is a dimension on the view, read from the model, never typed text. A sheet whose sizes are
+  a list of notes is not a drawing: nothing ties a line of text to a feature, and it doesn't follow
+  the model.
+- Each size once, on the view that shows the feature true and in profile. No size that can be
+  added up from others in the same chain (leave one out, or give the overall as the check).
+- Diameters: the `cylinder` kind on the side view (reads Ø between the silhouettes), or `radial`
+  with `diameter: true` on a circle seen face on. A partial circle reads R unless `diameter` is set.
+- Lengths: from one datum face (the face the part locates on) or as one row end to end, then the
+  overall length in a row outside it. Don't mix the two schemes on one view.
+- Across flats, slot widths and steps: the `faces` kind between the two faces.
+- Dimension lines sit outside the view's outline: the first row 10 mm from it, each further row
+  10 mm more, shorter dimensions nearer the part. A diameter's line goes beside the feature it
+  sizes, not across the view to the far end. No dimension line crosses another; no text sits on a
+  line or on the part.
+- `decimals` says the tolerance: whole millimetres 0, tenths 1, a fit's size 2 or 3. `8.00` on a
+  free length asks for a hundredth nobody needs.
+- A tolerance or fit the user gave goes on its dimension with `override_text` (`"Ø10 h9"`), which
+  Check Drawing reports as `overridden`: expected. Never tolerance a dimension on your own judgment.
+
+**Callouts and notes**
+- A thread, a chamfer, a knurl, a surface finish: one note with a leader ending on the feature
+  (`anchor: {edge: {view, edge}}`), placed outside the view: `M10 × 1.5`, `C0.5`, `Ra 0.4`.
+- What applies to the whole part goes in one numbered note, `NOTES` then `1. …`, near the title
+  block or the lower left: deburring, finish, heat treatment, the standard its general tolerances
+  follow. Six lines at most.
+- Nothing else is written on the sheet: no heading with the part's name, no "provisional", no
+  quantity or scale line, no caption under a view, no restating a dimension in words. The title
+  block has the title, number, material, scale and revision.
+- Text is 3.5 mm (the default); only a view label is larger.
+
+**Title block**
+- Link the sheet to its part (`documents`) so title, material and mass are read, not typed. Type
+  over a cell (`title_block_overrides`) only for what the user gave: a drawing number, a title that
+  differs from the body's name, a finish.
+- A long name runs out of its cell: `drawing.inspect`'s `title_block_cells[].notes` says which.
+- Ask for what is empty (owner, drawn by, date) rather than leaving it or making it up.
+
+**Ask, don't invent.** Tolerances, fits, surface finishes, materials, part numbers and revision
+letters come from the user or from the project's own files (`project_search`, `project_read`). If
+the sheet needs one you don't have, ask once, listing them all.
+
+## A turned part, step by step
+The order that works for a shaft, pin, bush or spacer (the male shaft of the example below took
+these steps):
+1. `body_topology {"body": name, "faces": "cylinders"}`: each cylinder's radius and its `extent`
+   along the axis give every diameter and every shoulder. `model.faces` gives a `point` on each flat
+   face (the shoulders, the ends, any flats); `model.edges` gives each edge's `mid` for leaders.
+2. A new sheet with its `size`, linked to the part. Main view: a base view with a `view` of
+   `{direction, up}` chosen so the axis runs along the paper's X (`direction` square to the axis,
+   `up` square to both), `source: {occurrences: [[id]]}` for a part inside an assembly.
+3. End view: `drawing.view.projected` to the `right`, only when the part has flats, holes or a
+   shape the side view can't size.
+4. One row of lengths between neighbouring shoulders with the `faces` kind, `direction: "horizontal"`,
+   then the overall. Move the row to `min.y - 10` and the overall to `min.y - 20` of the view's
+   `boundary_mm`.
+5. Each diameter with `cylinder`, its line moved just past the end of the view nearest that
+   feature (`min.x - 10` or `max.x + 10`), further out for the next.
+6. On the end view: across flats with `faces`, a collar with flats as `radial` with
+   `diameter: true`, its text moved off the view (`text_to_mm`).
+7. Threads as leader notes from the thread's end edge. A modelled thread draws every turn; say so to
+   the user if it clutters: a cosmetic thread draws the conventional two lines instead.
+8. An internal feature: `drawing.view.section` with a `full` line along the axis, and its depths
+   dimensioned on the section.
+9. Check, list overlaps from `drawing.scene`, show the sheet, screenshot, fix, repeat.
+
+## Looking at your own sheet
+- `drawing.sheet.show {"sheet": name}` puts a sheet on the window's sheet page; the page otherwise
+  keeps showing whichever sheet it had, and the user sees none of your work. Then
+  `screenshot {"source":"window"}`.
+- `drawing.scene {"sheet": name}` → `objects: [{object, kind, bounds_mm}]`. Two boxes overlap when
+  `a.min.x < b.max.x && b.min.x < a.max.x` and the same in y. A dimension's box includes its
+  extension lines, so dimensions of one row always touch: test notes, view labels and tables against
+  everything, and each dimension's `layout.text_boxes` (`drawing.dimension.inspect`) against the
+  other texts and the views' `boundary_mm`.
+- Before you say it's done: every feature sized and placed? Any text on a line or on the part? Any
+  typed size? Anything on the sheet the title block already says? Any empty title block cell you
+  could have asked about?
+
 ## Ids
 Drawing, sheet, view, dimension and note ids are random (`"259g7shs2tfj1"`), not counters, so a
 batch can't name what an earlier step of the same batch made. Build in three batches: the sheet and
@@ -31,6 +133,7 @@ dimensions and notes on each sheet.
   `deferred`).
 - `drawing.sheet.add`: `name?`, `size?` (`{"standard":"a2"}` or `{"custom":{"sides_mm":[w,h]}}`),
   `orientation?`. `drawing.sheet.set` changes one, and links it to the part it documents.
+  `drawing.sheet.show {"sheet": name}` shows one in the window.
 
 ### The title block
 The built-in block reads fields; nothing needs typing when its sources are set:
@@ -121,6 +224,12 @@ that sees the sketch face on) and extrude distances. A box's, cylinder's or hole
   Writing a file waits for the user's approval.
 
 ## Traps
+- `drawing.sheet.add` copies the paper of the sheet before it: after an A2 sheet a new one is A2
+  unless `size` says otherwise. Read `size_mm` back before placing by coordinates.
+- A note with a leader needs a point on a real edge: take an edge's `mid` from `model.edges`. A
+  point on a face, or on a modelled thread's flank, is refused ("no edge at").
+- A view of a whole large assembly at 1:1 can fail or run off the sheet; a detail sheet draws one
+  part with `source`.
 - A batch can't use an id made earlier in the same batch: see Ids.
 - `offset_mm` from the midpoint: see Placing.
 - `decimals` defaults to 2 (`100.00`); the built-in title block's general tolerance is ±0.2 mm, so

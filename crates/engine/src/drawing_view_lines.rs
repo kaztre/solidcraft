@@ -366,12 +366,17 @@ pub fn paper_lines(lines: &Lines, object: u64, group: LineGroup) -> (Group, Vec<
     (Group { object, kind: ObjectKind::View, items }, drew)
 }
 
-/// `seg`, or nothing where it has no length to draw: a line whose ends are one point. An arc too
-/// short to sweep is drawn as its chord.
-pub(super) fn drawable(seg: Seg2) -> Option<Seg2> {
+/// `seg`, or nothing where it has no length to draw: a line whose ends are one point, or a curve
+/// whose control points are all one point (a paper scene refuses that as a collapsed curve, and one
+/// such piece failed the whole view: "collapsed curve: choose a smaller scale"). An arc too short to
+/// sweep is drawn as its chord.
+pub(crate) fn drawable(seg: Seg2) -> Option<Seg2> {
     match seg {
         Seg2::Arc { sweep, .. } if sweep.abs() < 1e-9 => drawable(Seg2::Line { a: seg.start(), b: seg.end() }),
         Seg2::Line { a, b } if a == b => None,
+        Seg2::Cubic { p0, p1, p2, p3 } if p1 == p0 && p2 == p0 && p3 == p0 => None,
+        Seg2::Conic { a, apex, b, .. } if apex == a && b == a => None,
+        Seg2::Bezier { n, ref p } if p.iter().take(usize::from(n) + 1).all(|q| *q == p[0]) => None,
         _ => Some(seg),
     }
 }
@@ -554,6 +559,24 @@ fn refused(e: Refused) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A piece with no length draws nothing and is left out, a curve as much as a line: one curve
+    /// whose control points were all one point failed its whole view ("collapsed curve").
+    #[test]
+    fn a_collapsed_curve_is_left_out_like_a_line_with_no_length() {
+        let p = Vec2::new(3.0, 4.0);
+        let q = Vec2::new(5.0, 4.0);
+        assert_eq!(drawable(Seg2::Line { a: p, b: p }), None);
+        assert_eq!(drawable(Seg2::Cubic { p0: p, p1: p, p2: p, p3: p }), None);
+        assert_eq!(drawable(Seg2::Conic { a: p, apex: p, b: p, w: 0.7 }), None);
+        let mut ctrl = [Vec2::ZERO; solidcore_record::MAX_BEZIER_CTRL];
+        ctrl.iter_mut().take(5).for_each(|c| *c = p);
+        assert_eq!(drawable(Seg2::Bezier { n: 4, p: ctrl }), None);
+        let cubic = Seg2::Cubic { p0: p, p1: p, p2: p, p3: q };
+        assert_eq!(drawable(cubic), Some(cubic));
+        ctrl[4] = q;
+        assert!(drawable(Seg2::Bezier { n: 4, p: ctrl }).is_some());
+    }
 
     /// A view's lines refused say what happened and what to do on a drawing, never in a DXF's terms.
     #[test]
