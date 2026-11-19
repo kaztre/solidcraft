@@ -1,0 +1,42 @@
+{
+  "en": {
+    "ui.versions_release_set_hint": "Checks the part and its drawings first, then saves its STEP, each drawing as a PDF and each flat pattern as a DXF in Released/{name}/{revision}, read-only.",
+    "ui.versions_released_set": "Released {revision}: {count} files checked in, the release set in {folder}.",
+    "ui.versions_releasing": "Releasing {revision}…"
+  },
+  "de": {
+    "ui.versions_release_set_hint": "Prüft zuerst das Teil und seine Zeichnungen und speichert dann sein STEP, jede Zeichnung als PDF und jede Abwicklung als DXF schreibgeschützt in Released/{name}/{revision}.",
+    "ui.versions_released_set": "{revision} freigegeben: {count} Dateien eingecheckt, der Freigabesatz in {folder}.",
+    "ui.versions_releasing": "{revision} wird freigegeben…"
+  },
+  "ja": {
+    "ui.versions_release_set_hint": "まず部品とその図面をチェックし、STEP、各図面の PDF、各展開図の DXF を Released/{name}/{revision} に読み取り専用で保存します。",
+    "ui.versions_released_set": "{revision} をリリースしました: {count} 個のファイルをチェックインし、リリースセットは {folder} にあります。",
+    "ui.versions_releasing": "{revision} をリリースしています…"
+  },
+  "zh": {
+    "ui.versions_release_set_hint": "先检查零件及其工程图，然后将其 STEP、每张工程图的 PDF 和每个展开图的 DXF 以只读方式保存到 Released/{name}/{revision}。",
+    "ui.versions_released_set": "已发布 {revision}：签入了 {count} 个文件，发布文件集位于 {folder}。",
+    "ui.versions_releasing": "正在发布 {revision}…"
+  },
+  "ko": {
+    "ui.versions_release_set_hint": "먼저 부품과 도면을 검사한 다음 STEP, 각 도면의 PDF, 각 전개도의 DXF를 Released/{name}/{revision}에 읽기 전용으로 저장합니다.",
+    "ui.versions_released_set": "{revision} 릴리스됨: 파일 {count}개를 체크인했으며 릴리스 세트는 {folder}에 있습니다.",
+    "ui.versions_releasing": "{revision} 릴리스 중…"
+  },
+  "ar": {
+    "ui.versions_release_set_hint": "يفحص القطعة ورسوماتها أولاً، ثم يحفظ ملف STEP الخاص بها وكل رسمة بصيغة PDF وكل نموذج مفرود بصيغة DXF في Released/{name}/{revision} للقراءة فقط.",
+    "ui.versions_released_set": "تم إصدار {revision}: سُجّل {count} ملفات، ومجموعة الإصدار في {folder}.",
+    "ui.versions_releasing": "جارٍ إصدار {revision}…"
+  },
+  "he": {
+    "ui.versions_release_set_hint": "בודק תחילה את החלק ואת השרטוטים שלו, ואז שומר את קובץ ה-STEP שלו, כל שרטוט כ-PDF וכל פריסה כ-DXF בתיקייה Released/{name}/{revision}, לקריאה בלבד.",
+    "ui.versions_released_set": "{revision} שוחרר: {count} קבצים נרשמו, ערכת השחרור ב-{folder}.",
+    "ui.versions_releasing": "משחרר את {revision}…"
+  },
+  "vi": {
+    "ui.versions_release_set_hint": "Trước tiên kiểm tra chi tiết và các bản vẽ của nó, sau đó lưu tệp STEP, mỗi bản vẽ dưới dạng PDF và mỗi hình khai triển dưới dạng DXF vào Released/{name}/{revision}, chỉ đọc.",
+    "ui.versions_released_set": "Đã phát hành {revision}: đã lưu {count} tệp, bộ phát hành nằm trong {folder}.",
+    "ui.versions_releasing": "Đang phát hành {revision}…"
+  }
+}

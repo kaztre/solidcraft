@@ -21,7 +21,7 @@ description: "Use when someone asks how to set up or use a parts library, insert
 2. **STEP parts:** inserting one saves a SolidCraft part beside it with its picture, then links it. **Convert N to SolidCraft Parts…** does a whole category; try a small one first.
 3. **Start keeping versions:** open a saved part ▸ **Show Versions** ▸ **Keep Versions of "folder"**. Every design and STEP file in that folder and its sub-folders gets a history.
 4. **Check in:** save, type what changed, untick anything to leave out under **My changes**, press **Check In**.
-5. **Release a revision:** with the part open, tick **Release as Rev B** before **Check In**. It also sets the part's Revision (shown in bills of materials).
+5. **Release a revision:** tick **Release as Rev B** before **Check In**. It checks the part and its drawings, then saves STEP, PDFs and flat DXFs read-only in `Released/` (`versions.release`).
 6. **Go back:** click a version in the history ▸ **Open This Version** to look, **Restore … to This Version…** to put it back (then check it in), **Save as New Part…** to branch off a copy.
 7. **Whole project:** switch **This part** to **Whole folder** for everything, **Restore Whole Folder to This Version…** and **Name This Version…** ("v1.3").
 

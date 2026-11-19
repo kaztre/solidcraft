@@ -245,6 +245,48 @@ pub struct VersionsNameReply {
     pub commit: String,
 }
 
+/// Release the open design as a revision, with its release set (fork).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct VersionsReleaseParams {
+    #[serde(deserialize_with = "folder")]
+    pub folder: String,
+    /// The open design's file, relative to the folder: saved, and unchanged since.
+    pub design: String,
+    /// Such as "Rev B": the design's Revision property, and not released before.
+    pub revision: String,
+    /// What changed, shown in the history.
+    pub message: String,
+    #[serde(default, deserialize_with = "optional_text")]
+    pub author: Option<String>,
+    /// Only check: nothing is written.
+    #[serde(default)]
+    pub dry_run: Option<bool>,
+    /// Other changed files of the folder to check in with the release.
+    #[serde(default)]
+    pub also: Option<Vec<String>>,
+}
+
+/// A release, or what keeps it from being one.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct VersionsReleaseReply {
+    pub revision: String,
+    /// Nothing blocks it.
+    pub ready: bool,
+    /// What keeps it from release: each is to be fixed first.
+    pub blocked: Vec<String>,
+    /// What a release may still want (empty title block fields, features no dimension points at).
+    pub notes: Vec<String>,
+    /// The release set, relative to the folder: the design, its STEP, each drawing's PDF and each
+    /// sheet metal body's flat DXF.
+    pub files: Vec<String>,
+    /// The version that holds the release (not with `dry_run`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub short: Option<String>,
+}
+
 #[cfg(test)]
 #[path = "versions_tests.rs"]
 mod tests;

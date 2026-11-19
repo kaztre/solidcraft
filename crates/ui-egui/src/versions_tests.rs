@@ -55,10 +55,15 @@ fn a_part_on_its_own_keeps_versions_checks_in_and_is_released() {
     h.step(&json!({"widget": "Check In 1 File"})).unwrap();
     settle(&mut h, |app| history_len(app) == 1 && status(app).is_some_and(|s| s["changes"].as_array().is_some_and(Vec::is_empty)));
     let history = h.app.versions.history.clone().unwrap().unwrap();
-    assert_eq!(history["commits"][0]["message"], "First clip");
+    assert!(history["commits"][0]["message"].as_str().unwrap().starts_with("First clip"), "{history}");
     assert_eq!(history["commits"][0]["revisions"], json!([{"path": "Tether clip.solidcraft", "revision": "Rev A"}]));
     let props = h.app.run("document.metadata", json!({})).unwrap_or_default();
     assert!(props.to_string().contains("Rev A"), "{props}");
+    // The release set beside it (fork): the part as STEP, read-only, checked in with the part.
+    let step = folder.join("Released/Tether clip/Rev A/Tether clip Rev A.step");
+    assert!(std::fs::read(&step).unwrap().starts_with(b"ISO-10303-21"), "{}", step.display());
+    assert!(std::fs::metadata(&step).unwrap().permissions().readonly());
+    assert_eq!(history["commits"][0]["files"].as_array().unwrap().len(), 2, "{history}");
     // The history is a graph of rows: a click on a version's row picks it, another lets it go.
     let row = std::format!("dialog:list:version:{}", history["commits"][0]["short"].as_str().unwrap());
     h.frames(2);

@@ -43,12 +43,21 @@ enum Confirm {
 /// What to do when a command run beside the window finishes.
 enum After {
     Started(String),
-    CheckedIn { message: String },
+    CheckedIn {
+        message: String,
+    },
     Restored,
     Open,
     NewPart,
     Named,
-    Released { name: String, revision: String },
+    Released {
+        name: String,
+        revision: String,
+    },
+    /// A release with its release set (`versions.release`), run on a copy of the design.
+    ReleasedSet {
+        revision: String,
+    },
 }
 
 /// A check-in waiting for the design in front to finish saving.
@@ -317,6 +326,20 @@ fn done(app: &mut SolveApp, after: After, result: Result<Value, String>) {
         }
         After::Named => app.set_status(format("ui.versions_named", &[("name", r["tag"].as_str().unwrap_or(""))]), false),
         After::Released { name, revision } => app.set_status(format("ui.versions_released", &[("name", &name), ("revision", &revision)]), false),
+        After::ReleasedSet { revision } => {
+            let count = r["files"].as_array().map_or(0, Vec::len);
+            let folder = r["files"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .find_map(|f| f.rsplit_once('/').map(|(dir, _)| dir.to_string()).filter(|dir| dir.starts_with("Released/")))
+                .unwrap_or_default();
+            app.set_status(format("ui.versions_released_set", &[("revision", &revision), ("count", &count.to_string()), ("folder", &folder)]), false);
+            app.versions.message.clear();
+            app.versions.release = false;
+            app.versions.left_out.clear();
+        }
     }
 }
 
@@ -326,14 +349,40 @@ fn key_for(count: usize) -> &'static str {
 }
 
 fn check_in_now(app: &mut SolveApp, q: Queued) {
-    let mut params = json!({"folder": q.folder, "message": q.message, "paths": q.paths});
-    if let Some((path, revision)) = q.release {
-        params["release"] = json!({"path": path, "revision": revision});
+    if let Some((design, revision)) = q.release {
+        release_now(app, q.folder, q.message, q.paths, design, revision);
+        return;
     }
+    let mut params = json!({"folder": q.folder, "message": q.message, "paths": q.paths});
     if !app.preferences.versions_author.trim().is_empty() {
         params["author"] = json!(app.preferences.versions_author.trim());
     }
     act(app, After::CheckedIn { message: q.message }, "versions.check_in", params);
+}
+
+/// Release the design in front as `revision` with its release set: checked, exported and checked
+/// in beside the window, on a copy of the design as saved (the exports take a while).
+fn release_now(app: &mut SolveApp, folder: String, message: String, paths: Vec<String>, design: String, revision: String) {
+    if app.versions.acting.is_some() {
+        return;
+    }
+    let also: Vec<String> = paths.into_iter().filter(|p| *p != design).collect();
+    let mut params = json!({"folder": folder, "design": design, "revision": revision, "message": message, "also": also});
+    if !app.preferences.versions_author.trim().is_empty() {
+        params["author"] = json!(app.preferences.versions_author.trim());
+    }
+    let mut copy = app.session.scratch_as_shown();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new().name("versions-release".into()).spawn(move || {
+        let _ = tx.send(copy.execute("versions.release", &params).map_err(|e| e.to_string()));
+    });
+    match spawned {
+        Ok(_) => {
+            app.set_status(format("ui.versions_releasing", &[("revision", &revision)]), false);
+            app.versions.acting = Some((After::ReleasedSet { revision }, rx));
+        }
+        Err(_) => app.set_status(format("ui.versions_failed", &[("error", "no thread to run on")]), true),
+    }
 }
 
 /// The revision after the ones `path` has: Rev A, then the next letter.
@@ -511,6 +560,16 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui, v: &View, folder: &str) {
         let revision = design_change.map(|d| next_revision(app.versions.history.as_ref().and_then(|h| h.as_ref().ok()), d));
         if let Some(rev) = &revision {
             ui_kit::checkbox(ui, &format("ui.versions_release", &[("revision", rev)]), &mut app.versions.release);
+            if app.versions.release
+                && let Some(d) = design_change
+            {
+                let name = std::path::Path::new(d).file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                ui_kit::text(
+                    ui,
+                    &format("ui.versions_release_set_hint", &[("name", &name), ("revision", rev)]),
+                    ui_kit::Text::Hint("versions_release"),
+                );
+            }
         }
         let chosen: Vec<String> = changes.iter().filter(|(p, _, _)| !app.versions.left_out.contains(p)).map(|(p, _, _)| p.clone()).collect();
         let key = match chosen.len() {

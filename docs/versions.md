@@ -56,6 +56,16 @@ that revision with the check-in. Its Revision property (File ▸ Design Properti
 saved first, so the bill of materials of every assembly that uses it shows it. The next revision
 follows the last one: Rev A, Rev B, Rev C…
 
+A release is checked first, beside the window, and refused, naming every reason, while a feature
+fails or Check Drawing finds a dimension, balloon or note lost, ambiguous, unmeasurable or on a
+suppressed feature, a view failed, out of date or empty, or anything off its sheet. Empty title
+block fields and features no dimension points at are noted, not refused. Then the release set is
+written to `Released/<part>/Rev B/` in the folder: the part as STEP, each of its drawings as one
+PDF of its sheets (printed at actual size), and each sheet metal body's flat pattern as DXF. It is
+checked in with the part as one version released as that revision, and its files are made
+read-only: a released revision is never written over, and the same revision can't be released
+again. A change after it is the next revision (fork).
+
 You can also release an earlier check-in: pick it in the history and press **Release NAME as
 Rev X…**. Revisions are saved in the history and never move.
 
@@ -90,5 +100,7 @@ check-in would save. `versions.check_in {folder, message, paths, author?, releas
 revision}}` saves a version, `versions.history {folder, path?, limit?}` lists them,
 `versions.restore {folder, commit, path?}` puts parts back, `versions.copy {folder, commit, path,
 to?}` writes an old version to a new file, and `versions.name {folder, commit, version? | path
-and revision}` names a version or releases a revision. Paths are relative to the folder, with `/`
+and revision}` names a version or releases a revision. `versions.release {folder, design,
+revision, message, author?, also?, dry_run?}` releases the open design with its release set
+(`dry_run` only checks: `ready`, `blocked`, `notes`, `files`). Paths are relative to the folder, with `/`
 between folders. None of them change the open design.

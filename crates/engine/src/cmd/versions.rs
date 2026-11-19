@@ -16,8 +16,8 @@ use super::CommandSpec;
 use crate::params::bad;
 use crate::schema::versions::{
     VersionChange, VersionEntry, VersionFile, VersionRevision, VersionsCheckInParams, VersionsCheckInReply, VersionsCopyParams, VersionsCopyReply,
-    VersionsFolderParams, VersionsHistoryParams, VersionsHistoryReply, VersionsNameParams, VersionsNameReply, VersionsRestoreParams,
-    VersionsRestoreReply, VersionsStatusReply,
+    VersionsFolderParams, VersionsHistoryParams, VersionsHistoryReply, VersionsNameParams, VersionsNameReply, VersionsReleaseParams,
+    VersionsReleaseReply, VersionsRestoreParams, VersionsRestoreReply, VersionsStatusReply,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -28,6 +28,7 @@ const HISTORY_CONTRACT: TypedContract<VersionsHistoryParams> = TypedContract::ne
 const RESTORE_CONTRACT: TypedContract<VersionsRestoreParams> = TypedContract::new();
 const COPY_CONTRACT: TypedContract<VersionsCopyParams> = TypedContract::new();
 const NAME_CONTRACT: TypedContract<VersionsNameParams> = TypedContract::new();
+const RELEASE_CONTRACT: TypedContract<VersionsReleaseParams> = TypedContract::new();
 
 const DEFAULT_LIMIT: usize = 200;
 const MAX_LIMIT: usize = 5000;
@@ -92,6 +93,23 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<VersionsNameReply>)
         .params(
             "folder; commit; version?: a name for the whole folder (v1.3), or path? and revision?: a part's revision (Rev B); author? → tag, commit",
+        ),
+    CommandSpec::new("versions.release", "Release", crate::checked!("versions.release", release))
+        .icon("save")
+        .noundo()
+        .any_part()
+        .contract(&RELEASE_CONTRACT)
+        .output(output_schema_for::<VersionsReleaseReply>)
+        .params(
+            "folder; design: the open design's file relative to the folder, saved and unchanged since, its Revision property \
+             `revision`; revision: such as Rev B, not released before; message: what changed; author?; also?: [other files of the \
+             folder to check in with it]; dry_run?: only check → \
+             revision, ready, blocked: [what keeps it from release], notes: [what a release may still want], files: [the release \
+             set, relative to the folder], commit?, short?. Refused, naming every reason, while a feature fails or Check Drawing \
+             finds a dimension, balloon or note lost, ambiguous, unmeasurable or on a suppressed feature, a view failed, out of \
+             date or empty, or anything off its sheet. Writes Released/<design>/<revision>/: the design as STEP, each drawing as \
+             one PDF of its sheets, each sheet metal body's flat pattern as DXF; checks them in with the design as one version \
+             released as `revision`, and makes them read-only. Never changes the open design",
         ),
 ];
 
@@ -315,6 +333,180 @@ fn name(_s: &mut Session, p: &Value) -> Result<Value> {
     serde_json::to_value(VersionsNameReply { tag: tag.name, commit: tag.commit }).map_err(|e| bad(cmd, e.to_string()))
 }
 
+/// Check Drawing findings that keep a drawing from release; the others are noted.
+const BLOCKING: &[&str] = &["lost", "ambiguous", "unmeasurable", "suppressed", "failed", "out_of_date", "nothing_shown", "outside_sheet"];
+
+/// `name` as one file name: no folder separators or characters a file system refuses.
+fn file_part(name: &str) -> String {
+    let out: String = name.chars().map(|c| if c.is_control() || "/\\:*?\"<>|".contains(c) { '-' } else { c }).collect();
+    let out = out.trim().trim_matches('.').trim().to_string();
+    if out.is_empty() { "part".into() } else { out.chars().take(120).collect() }
+}
+
+fn nested(s: &mut Session, id: &str, p: Value) -> Result<Value> {
+    let spec = super::find_command(id).ok_or_else(|| crate::EngineError::UnknownCommand(id.to_string()))?;
+    spec.run_nested(s, &p)
+}
+
+/// The design's drawings, each checked: what blocks its release and what it may still want.
+fn check_drawings(s: &mut Session, blocked: &mut Vec<String>, notes: &mut Vec<String>) -> Result<()> {
+    let drawings: Vec<(u64, String)> = s.doc.drawings.iter().map(|d| (d.id, d.name.clone())).collect();
+    for (id, name) in drawings {
+        nested(s, "drawing.open", serde_json::json!({"drawing": solidcraft_doc::ids::encode(id)}))?;
+        let check = nested(s, "drawing.check", serde_json::json!({}))?;
+        for f in check["findings"].as_array().into_iter().flatten() {
+            let kind = f["kind"].as_str().unwrap_or("");
+            let why = f["why"].as_str().unwrap_or(kind);
+            let what = match f["object"]["kind"].as_str() {
+                Some(object) => format!("drawing {name}: {} {object}: {why}", kind.replace('_', " ")),
+                None => format!("drawing {name}: {why}"),
+            };
+            if BLOCKING.contains(&kind) { blocked.push(what) } else { notes.push(what) }
+        }
+        for c in check["coverage"].as_array().into_iter().flatten().filter(|c| c["state"] == "not_covered") {
+            notes.push(format!("drawing {name}: nothing dimensions feature {}", c["name"].as_str().unwrap_or("?")));
+        }
+    }
+    Ok(())
+}
+
+/// Write the release set into `dir`: the design as STEP, each drawing's sheets as one PDF, each
+/// sheet metal body's flat pattern as DXF. The names, relative to `dir`.
+fn write_release_set(s: &mut Session, dir: &Path, stem: &str, revision: &str) -> Result<Vec<String>> {
+    let mut names = vec![format!("{stem} {revision}.step")];
+    let at = |n: &str| dir.join(n).to_string_lossy().into_owned();
+    nested(s, "file.export", serde_json::json!({"path": at(&names[0]), "format": "step"}))?;
+    let drawings: Vec<(u64, String)> = s.doc.drawings.iter().map(|d| (d.id, d.name.clone())).collect();
+    for (id, name) in drawings {
+        let file = format!("{} {revision}.pdf", file_part(&name));
+        nested(s, "drawing.open", serde_json::json!({"drawing": solidcraft_doc::ids::encode(id)}))?;
+        nested(s, "drawing.export", serde_json::json!({"all_sheets": true, "format": "pdf", "path": at(&file)}))?;
+        names.push(file);
+    }
+    s.open_drawing = None;
+    let sheets: Vec<String> = s.model.state().sheets.iter().map(|sh| sh.body.clone()).collect();
+    for body in sheets {
+        let file = format!("{stem} {} {revision} flat.dxf", file_part(&body));
+        nested(s, "sheet.export_dxf", serde_json::json!({"body": body, "path": at(&file)}))?;
+        names.push(file);
+    }
+    Ok(names)
+}
+
+fn release(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "versions.release";
+    let store = store(cmd, p)?;
+    if !store.exists() {
+        return Err(bad(cmd, "the folder doesn't keep versions yet: start keeping them first (versions.start)"));
+    }
+    let design = text(p, "design").ok_or_else(|| bad(cmd, "`design` is required: the design's file, relative to the folder"))?;
+    versions::check_path(design).map_err(failed(cmd))?;
+    let revision = text(p, "revision").ok_or_else(|| bad(cmd, "`revision` is required, such as Rev B"))?;
+    if revision.len() > 64 || file_part(revision) != revision {
+        return Err(bad(cmd, "`revision` must be a short name that can be part of a file name, such as Rev B"));
+    }
+    let message = text(p, "message").ok_or_else(|| bad(cmd, "`message` is required: say what changed"))?;
+    let dry_run = p.get("dry_run").and_then(Value::as_bool).unwrap_or(false);
+    let also: Vec<String> = p.get("also").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+    for other in &also {
+        versions::check_path(other).map_err(failed(cmd))?;
+    }
+    let stem = file_part(&Path::new(design).file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+    let folder = format!("Released/{stem}/{revision}");
+    let dir = store.work.join(&folder);
+
+    let mut blocked = Vec::new();
+    let mut notes = Vec::new();
+    if !store.work.join(design).is_file() {
+        blocked.push(format!("{design} isn't in the folder: save the design there first"));
+    }
+    if s.is_dirty() {
+        blocked.push("the design has changes that aren't saved: save it first".into());
+    }
+    if s.doc.metadata.text("revision").map(str::trim) != Some(revision) {
+        blocked.push(format!("the design's Revision property isn't {revision}: set it and save the design first"));
+    }
+    let tags = store.tags().map_err(failed(cmd))?;
+    if dir.exists() || tags.iter().any(|t| t.part.as_deref() == Some(design) && t.revision.as_deref() == Some(revision)) {
+        blocked.push(format!("{design} was released as {revision} already: release the next revision"));
+    }
+    for r in &s.model.results {
+        if let Some(e) = &r.error {
+            blocked.push(format!("feature {} fails: {e}", r.name));
+        }
+    }
+    let open = s.open_drawing;
+    let checked = check_drawings(s, &mut blocked, &mut notes);
+    s.open_drawing = open;
+    checked?;
+
+    let mut files = vec![design.to_string(), format!("{folder}/{stem} {revision}.step")];
+    files.extend(s.doc.drawings.iter().map(|d| format!("{folder}/{} {revision}.pdf", file_part(&d.name))));
+    files.extend(s.model.state().sheets.iter().map(|sh| format!("{folder}/{stem} {} {revision} flat.dxf", file_part(&sh.body))));
+    let reply = |ready, blocked, notes, files, commit: Option<String>| VersionsReleaseReply {
+        revision: revision.to_string(),
+        ready,
+        blocked,
+        notes,
+        files,
+        short: commit.as_deref().map(|c| versions::short(c).to_string()),
+        commit,
+    };
+    if !blocked.is_empty() && !dry_run {
+        return Err(bad(cmd, format!("{design} isn't released as {revision}: {}", blocked.join("; "))));
+    }
+    if dry_run {
+        let ready = blocked.is_empty();
+        return serde_json::to_value(reply(ready, blocked, notes, files, None)).map_err(|e| bad(cmd, e.to_string()));
+    }
+
+    // Written beside the release folder first, and moved into place only once all of it is.
+    let staging = store.work.join(format!("Released/{stem}/.{revision} (being released)"));
+    let _ = std::fs::remove_dir_all(&staging);
+    std::fs::create_dir_all(&staging).map_err(|e| bad(cmd, format!("{}: {e}", staging.display())))?;
+    let written = write_release_set(s, &staging, &stem, revision);
+    s.open_drawing = open;
+    let names = match written {
+        Ok(names) => names,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&staging);
+            return Err(bad(cmd, format!("the release set couldn't be written: {e}")));
+        }
+    };
+    if let Err(e) = std::fs::rename(&staging, &dir) {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(bad(cmd, format!("{}: {e}", dir.display())));
+    }
+    let mut paths = vec![design.to_string()];
+    paths.extend(names.iter().map(|n| format!("{folder}/{n}")));
+    for other in also {
+        if !paths.contains(&other) {
+            paths.push(other);
+        }
+    }
+    let who = author(p);
+    let note = format!("{message}\n\nReleased as {revision}: {}", names.join(", "));
+    let checked_in =
+        store.check_in(&paths, &note, &who, now()).and_then(|c| store.name(&c.id, None, Some((design, revision)), &who, now()).map(|_| c));
+    let c = match checked_in {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(bad(cmd, e.to_string()));
+        }
+    };
+    // A released file is never written over: the next change is the next revision.
+    for n in &names {
+        let file = dir.join(n);
+        if let Ok(meta) = std::fs::metadata(&file) {
+            let mut perms = meta.permissions();
+            perms.set_readonly(true);
+            let _ = std::fs::set_permissions(&file, perms);
+        }
+    }
+    serde_json::to_value(reply(true, Vec::new(), notes, paths, Some(c.id))).map_err(|e| bad(cmd, e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,6 +564,58 @@ mod tests {
         assert_eq!(std::fs::read_to_string(dir.join("PARTS/Clip.solidcraft")).unwrap(), "clip one");
         let st = s.execute("versions.status", &json!({"folder": f})).unwrap();
         assert_eq!(st["changes"].as_array().unwrap().len(), 2, "{st}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A release checks the part and its drawings, writes the release set (the STEP and each
+    /// drawing's PDF) beside it, checks them in with the part as the revision and makes the set
+    /// read-only; the same revision again, or a part with a failing feature, is refused, naming
+    /// why (fork).
+    #[test]
+    fn a_release_writes_its_set_checks_it_in_and_refuses_what_isnt_ready() {
+        let dir = folder("release");
+        let f = dir.to_str().unwrap();
+        let design = dir.join("PARTS/Plate.solidcraft");
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 20, "height": 5, "body_name": "Plate"})).unwrap();
+        s.execute("drawing.create", &json!({"name": "Plate drawing", "standard_views": true})).unwrap();
+        s.execute("drawing.close", &json!({})).unwrap();
+        s.execute("document.metadata.set", &json!({"values": {"revision": "Rev A"}})).unwrap();
+        s.execute("file.save", &json!({"path": design})).unwrap();
+        s.execute("versions.start", &json!({"folder": f})).unwrap();
+        let ask = json!({"folder": f, "design": "PARTS/Plate.solidcraft", "revision": "Rev A", "message": "First release", "author": "Sam"});
+        let mut dry = ask.clone();
+        dry["dry_run"] = json!(true);
+        let check = s.execute("versions.release", &dry).unwrap();
+        assert_eq!(check["ready"], true, "{check}");
+        assert!(!dir.join("Released").exists(), "a dry run writes nothing");
+
+        let r = s.execute("versions.release", &ask).unwrap();
+        let files: Vec<&str> = r["files"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+        assert_eq!(files, ["PARTS/Plate.solidcraft", "Released/Plate/Rev A/Plate Rev A.step", "Released/Plate/Rev A/Plate drawing Rev A.pdf"], "{r}");
+        for (file, start) in [(files[1], &b"ISO-10303-21"[..]), (files[2], &b"%PDF"[..])] {
+            let path = dir.join(file);
+            assert!(std::fs::read(&path).unwrap().starts_with(start), "{file}");
+            assert!(std::fs::metadata(&path).unwrap().permissions().readonly(), "{file} is read-only");
+        }
+        let h = s.execute("versions.history", &json!({"folder": f})).unwrap();
+        assert_eq!(h["commits"][0]["revisions"], json!([{"path": "PARTS/Plate.solidcraft", "revision": "Rev A"}]), "{h}");
+        assert_eq!(h["commits"][0]["files"].as_array().unwrap().len(), 3, "{h}");
+        assert_eq!(s.execute("versions.status", &json!({"folder": f})).unwrap()["changes"], json!([]));
+        let again = s.execute("versions.release", &ask).unwrap_err().to_string();
+        assert!(again.contains("released as Rev A already"), "{again}");
+
+        // A failing feature keeps Rev B from release, and nothing is written.
+        s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "corner": [0, 0, 0], "operation": "cut", "name": "Pocket"})).unwrap();
+        s.execute("solid.fillet", &json!({"edges": [[2.5, 5, 5]], "radius": 1, "name": "Round"})).unwrap();
+        s.execute("timeline.suppress", &json!({"feature": "Pocket", "suppressed": true})).unwrap();
+        s.execute("document.metadata.set", &json!({"values": {"revision": "Rev B"}})).unwrap();
+        s.execute("file.save", &json!({"path": design})).unwrap();
+        let mut next = ask.clone();
+        next["revision"] = json!("Rev B");
+        let refused = s.execute("versions.release", &next).unwrap_err().to_string();
+        assert!(refused.contains("feature Round fails"), "{refused}");
+        assert!(!dir.join("Released/Plate/Rev B").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
