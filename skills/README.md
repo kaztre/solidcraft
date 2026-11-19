@@ -6,7 +6,7 @@ description that tell the agent when to load it, and an optional supporting refe
 
 The modelling documents are built into SolidCraft: its MCP server's `skill_reference` tool returns them, so an
 agent without file access (such as the one in SolidCraft's own chat) can still read a skill's reference.
-The contributor skills (everything except modeling, editing, checking, mechanisms, parts-and-versions and sheet metal) are for repository work and are not embedded in that tool. `AGENTS.md` routes to them; `cargo xtask skills` fails when its table and this folder disagree or a file, `cargo xtask` command or skill they name is gone.
+The contributor skills (everything except modeling, drawings, editing, checking, mechanisms, parts-and-versions and sheet metal) are for repository work and are not embedded in that tool. `AGENTS.md` routes to them; `cargo xtask skills` fails when its table and this folder disagree or a file, `cargo xtask` command or skill they name is gone.
 
 | Skill | Loads when the agent |
 |---|---|
@@ -24,6 +24,7 @@ The contributor skills (everything except modeling, editing, checking, mechanism
 | [`solidcraft-packaging`](solidcraft-packaging/SKILL.md) | prepares a release or changes packages |
 | [`solidcraft-agent-tools`](solidcraft-agent-tools/SKILL.md) | runs the app, drives the control channel or changes MCP tools |
 | [`solidcraft-modeling`](solidcraft-modeling/SKILL.md) | builds a new part (enclosure, bracket, plate, flange, …) |
+| [`solidcraft-drawings`](solidcraft-drawings/SKILL.md) | makes or changes a 2D engineering drawing of a design: sheets, standard and section views, dimensions placed outside the outline, notes, the title block filled from the part, Check Drawing, PDF, SVG or PNG export |
 | [`solidcraft-sheetmetal`](solidcraft-sheetmetal/SKILL.md) | builds or changes a sheet metal part: base, edge and contour flanges, segments, hem, fold, unfold, flat pattern, DXF and bend table, and turns a request in words into flange parameters |
 | [`solidcraft-editing`](solidcraft-editing/SKILL.md) | changes, fixes or extends an existing design |
 | [`solidcraft-checking`](solidcraft-checking/SKILL.md) | builds, changes or ports a design, next to the two above: parameter ranges, every allowed value, exact STEP comparison, regression tests, designs kept in git |
@@ -47,14 +48,14 @@ The modelling skills, for Claude Code in all projects:
 
 ```sh
 git clone --depth 1 https://github.com/tangency-labs/solidcraft
-cp -r solidcraft/skills/solidcraft-{modeling,editing,checking,mechanisms,sheetmetal} ~/.claude/skills/
+cp -r solidcraft/skills/solidcraft-{modeling,drawings,editing,checking,mechanisms,sheetmetal} ~/.claude/skills/
 ```
 
 Windows (PowerShell):
 
 ```powershell
 git clone --depth 1 https://github.com/tangency-labs/solidcraft
-foreach ($s in 'modeling','editing','checking','mechanisms','sheetmetal') { Copy-Item -Recurse solidcraft\skills\solidcraft-$s $HOME\.claude\skills\ }
+foreach ($s in 'modeling','drawings','editing','checking','mechanisms','sheetmetal') { Copy-Item -Recurse solidcraft\skills\solidcraft-$s $HOME\.claude\skills\ }
 ```
 
 - **One project only:** copy the folders into that project's `.claude/skills/` instead.

@@ -27,7 +27,8 @@ open the user watches the model appear, otherwise a headless session builds it. 
 with these tools straight away. Units are millimetres and degrees in expressions, Z is up.\n\n\
 Start: for anything beyond one primitive, call `skill_reference {\"skill\":\"solidcraft-modeling\"}` first (command shapes, \
 ids, plane axes, worked examples and the known traps of this version; `file: \"SKILL.md\"` has the workflow). Then \
-`inspect_design {\"measure\":false,\"sketches\":false}` to see what is already there.\n\n\
+`inspect_design {\"measure\":false,\"sketches\":false}` to see what is already there. For a 2D drawing of a part \
+(sheets, views, dimensions, a PDF), read `skill_reference {\"skill\":\"solidcraft-drawings\"}` instead.\n\n\
 Plan: work the numbers out first (the parameters, the expected volume and bounding box after each stage, the world point you \
 will use for each edge or face pick). Then build in a few `batch` calls (all-or-nothing; the reply names the failing step; \
 `save`, `measure` and `set_parameter` can be steps). Use `verbose: false`. Name every feature. `list_commands {\"filter\": word}` \

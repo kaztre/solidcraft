@@ -588,6 +588,8 @@ fn skill_reference_returns_bundled_text_without_backend_calls() {
         ("solidcraft-modeling", "SKILL.md", include_str!("../../../skills/solidcraft-modeling/SKILL.md")),
         ("solidcraft-mechanisms", "SKILL.md", include_str!("../../../skills/solidcraft-mechanisms/SKILL.md")),
         ("solidcraft-checking", "SKILL.md", include_str!("../../../skills/solidcraft-checking/SKILL.md")),
+        ("solidcraft-drawings", "SKILL.md", include_str!("../../../skills/solidcraft-drawings/SKILL.md")),
+        ("solidcraft-drawings", "reference.md", include_str!("../../../skills/solidcraft-drawings/reference.md")),
         ("solidcraft-editing", "SKILL.md", include_str!("../../../skills/solidcraft-editing/SKILL.md")),
         ("solidcraft-parts", "SKILL.md", include_str!("../../../skills/solidcraft-parts/SKILL.md")),
         ("solidcraft-parts", "reference.md", include_str!("../../../skills/solidcraft-parts/reference.md")),
@@ -609,8 +611,15 @@ fn skill_reference_returns_bundled_text_without_backend_calls() {
 #[test]
 fn skill_reference_refuses_unknown_names_and_paths_with_available_choices() {
     let mut s = server();
-    let skills =
-        ["solidcraft-checking", "solidcraft-editing", "solidcraft-mechanisms", "solidcraft-modeling", "solidcraft-parts", "solidcraft-sheetmetal"];
+    let skills = [
+        "solidcraft-checking",
+        "solidcraft-drawings",
+        "solidcraft-editing",
+        "solidcraft-mechanisms",
+        "solidcraft-modeling",
+        "solidcraft-parts",
+        "solidcraft-sheetmetal",
+    ];
     for skill in ["unknown", "../solidcraft-modeling", "/tmp/solidcraft-modeling"] {
         let r = raw_tool(&mut s, "skill_reference", json!({"skill": skill}));
         assert_eq!(r["result"]["isError"], true, "{r}");
@@ -3142,6 +3151,56 @@ fn sheetmetal_skill_example_builds_as_documented() {
     assert!(dy0.abs() < 1e-9 && dy1.abs() < 1e-9, "the bend lines run along x: {table}");
 }
 
+/// The worked example in `skills/solidcraft-drawings/reference.md` is what agents copy: three
+/// batches, each naming the ids the one before made, and the sheet, the places and the check the
+/// file states.
+#[test]
+fn drawings_skill_example_builds_as_documented() {
+    let doc = include_str!("../../../skills/solidcraft-drawings/reference.md");
+    let batches: Vec<&str> =
+        doc.split("```json\n").skip(1).filter_map(|b| b.split("```").next()).filter(|b| b.starts_with("{\"commands\":[")).collect();
+    assert_eq!(batches.len(), 3, "the example is three batches");
+    let batch = |s: &mut Server, text: &str, names: &[(&str, String)]| -> Value {
+        let mut text = text.to_string();
+        for (name, id) in names {
+            text = text.replace(&format!("\"{name}\""), &format!("\"{id}\""));
+        }
+        let reply = tool(s, "batch", serde_json::from_str(&text).expect("a batch is JSON"));
+        reply["results"].clone()
+    };
+    let id = |v: &Value| v.as_str().unwrap_or_else(|| panic!("an id: {v}")).to_string();
+    let near = |v: &Value, want: f64| (v.as_f64().unwrap_or(f64::NAN) - want).abs() < 0.01;
+    let mut s = server();
+
+    let first = batch(&mut s, batches[0], &[]);
+    let (source, top, right) = (id(&first[3]["sources"][0]["id"]), id(&first[4]["top"]), id(&first[4]["right"]));
+    assert_eq!(first[4]["scale"]["text"], "1:1", "{}", first[4]);
+    let view = tool(&mut s, "execute", json!({"command": "drawing.view.inspect", "params": {"view": top}}));
+    let b = &view["boundary_mm"];
+    assert!(near(&b["min"][0], 85.93) && near(&b["min"][1], 135.18) && near(&b["max"][0], 185.93) && near(&b["max"][1], 195.18), "{b}");
+
+    let second = batch(&mut s, batches[1], &[("SOURCE", source), ("TOP", top), ("RIGHT", right)]);
+    let texts: Vec<&str> = (3..9).map(|i| second[i]["text"].as_str().unwrap_or("")).collect();
+    assert_eq!(texts, ["100", "60", "30", "30", "Ø10", "20"], "{second}");
+    let line = |v: &Value| v["layout"]["dimension_lines"][0].clone();
+    assert!(near(&line(&second[5])[0][1], 140.18) && near(&line(&second[6])[0][0], 90.93), "the 30s sit inside: {second}");
+    let (d100, dx, dy) = (id(&second[3]["dimension"]), id(&second[5]["dimension"]), id(&second[6]["dimension"]));
+
+    let third = batch(&mut s, batches[2], &[("D100", d100.clone()), ("DX", dx.clone()), ("DY", dy.clone())]);
+    let check = &third[3];
+    let findings: Vec<(&str, &str)> = check["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .map(|f| (f["kind"].as_str().unwrap_or(""), f["cell"].as_str().unwrap_or("")))
+        .collect();
+    assert_eq!(findings, [("empty_field", "finish")], "{check}");
+    assert_eq!(check["coverage_counts"], json!([{"count": 2, "state": "covered"}]), "{check}");
+    let mut moved = |d: &str| line(&tool(&mut s, "execute", json!({"command": "drawing.dimension.inspect", "params": {"dimension": d}})));
+    let (l100, lx, ly) = (moved(&d100), moved(&dx), moved(&dy));
+    assert!(near(&l100[0][1], 115.0) && near(&lx[0][1], 125.0) && near(&ly[0][0], 76.0), "{l100} {lx} {ly}");
+}
+
 /// The skill reference's sketch-plane table: where sketch (10, 20) lands and which way +distance goes.
 #[test]
 fn sketch_plane_axes_match_the_skill_reference() {
@@ -3234,6 +3293,8 @@ fn skills_name_only_real_tools_and_commands() {
         include_str!("../../../skills/solidcraft-editing/SKILL.md"),
         include_str!("../../../skills/solidcraft-checking/SKILL.md"),
         include_str!("../../../skills/solidcraft-checking/reference/porting.md"),
+        include_str!("../../../skills/solidcraft-drawings/SKILL.md"),
+        include_str!("../../../skills/solidcraft-drawings/reference.md"),
         include_str!("../../../skills/solidcraft-mechanisms/SKILL.md"),
         include_str!("../../../skills/solidcraft-mechanisms/reference.md"),
         include_str!("../../../skills/solidcraft-parts/SKILL.md"),

@@ -539,8 +539,8 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
         tool(
             "skill_reference",
             "Skill reference",
-            "Read a document of SolidCraft's bundled agent skills (solidcraft-modeling, solidcraft-mechanisms, \
-             solidcraft-editing, solidcraft-checking, solidcraft-parts) from the copy built into SolidCraft. `file` defaults to reference.md; \
+            "Read a document of SolidCraft's bundled agent skills (solidcraft-modeling, solidcraft-drawings, \
+             solidcraft-mechanisms, solidcraft-editing, solidcraft-checking, solidcraft-parts) from the copy built into SolidCraft. `file` defaults to reference.md; \
              each skill also has SKILL.md. Unknown skills or files are refused with the available ones.",
             object(
                 json!({
