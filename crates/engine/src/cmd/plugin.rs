@@ -44,7 +44,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("plugin.run", "Run Plugin", checked!("plugin.run", run)).icon("play")
         .contract(&TypedContract::<RunParams>::new()).output(output_schema_for::<RunResult>)
         .params("path, approval: exact hash from plugin.inspect after reviewing permissions, entry, params?: JSON, named?: bool (refusals name the missing grant and how to approve it); explicit native Wasm component execution, one undo step; errors discard all edits"),
-    CommandSpec::new("plugin.tools", "List Plugin Tools", checked!("plugin.tools", tools)).icon("inspect").noundo().read_only().doc_only()
+    CommandSpec::new("plugin.tools", "List Plugin Tools", checked!("plugin.tools", tools)).any_part().icon("inspect").noundo().read_only().doc_only()
         .contract(&TypedContract::<ToolsParams>::new()).output(output_schema_for::<ToolsResult>)
         .params("name?: one tool, <plugin>.<entry>; every installed, enabled plugin's entries as tools for agents: name, kind (command or importer), the plugin's name, version and description, effect and strict input schema, and with name a command entry's approval hash; no plugin code runs"),
 ];

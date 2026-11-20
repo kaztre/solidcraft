@@ -28,7 +28,7 @@ const DEFAULT_MATCHES: usize = 100;
 const DEFAULT_CHARS: usize = 20_000;
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("project.files", "List Project Files", crate::checked!("project.files", list))
+    CommandSpec::new("project.files", "List Project Files", crate::checked!("project.files", list)).any_part()
         .icon("open")
         .noundo()
         .contract(&FILES_CONTRACT)
@@ -40,7 +40,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              keeps versions of the design in front, else the design's own folder; hidden files and build folders are left out. \
              Reads only; needs Preferences → AI → project folder on",
         ),
-    CommandSpec::new("project.search", "Search Project", crate::checked!("project.search", search))
+    CommandSpec::new("project.search", "Search Project", crate::checked!("project.search", search)).any_part()
         .icon("open")
         .noundo()
         .contract(&SEARCH_CONTRACT)
@@ -50,7 +50,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              limit?: most matches (default 100) → matches: [{path, line?, text}] (file names, then lines of text and KiCad \
              files), files_searched, truncated. PDFs are not searched: read them with project.read",
         ),
-    CommandSpec::new("project.read", "Read Project File", crate::checked!("project.read", read))
+    CommandSpec::new("project.read", "Read Project File", crate::checked!("project.read", read)).any_part()
         .icon("open")
         .noundo()
         .contract(&READ_CONTRACT)

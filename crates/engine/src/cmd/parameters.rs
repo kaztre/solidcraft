@@ -50,7 +50,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          (the configuration rules that switch a feature's suppression and read a parameter whose value changed run in their order, as on \
          activation; driven parameters and restrictions wait for a configuration edit or activation)",
     ),
-    CommandSpec::new("parameters.list", "List Parameters", crate::checked!("parameters.list", list))
+    CommandSpec::new("parameters.list", "List Parameters", crate::checked!("parameters.list", list)).any_part()
         .icon("list")
         .noundo()
         .doc_only()

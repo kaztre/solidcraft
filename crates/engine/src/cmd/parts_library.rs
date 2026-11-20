@@ -21,7 +21,7 @@ const DEFAULT_LIMIT: usize = 200;
 const MAX_LIMIT: usize = 5000;
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("library.parts.search", "Parts Library", crate::checked!("library.parts.search", search))
+    CommandSpec::new("library.parts.search", "Parts Library", crate::checked!("library.parts.search", search)).any_part()
         .at("SOLID", "INSERT")
         .icon("folder")
         .noundo()

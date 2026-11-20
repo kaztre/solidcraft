@@ -59,7 +59,21 @@ back (volume, errors, cylinder axes), or change them in one `batch` with `coales
 then set them back the same way before saving.\n\n\
 Fix, don't rebuild: a wrong number in a feature is changed with `timeline.edit` or `parameters.change` on its input \
 (`parameters.list {\"filter\":\"feature\"}` names them); `edit.checkpoint` and `edit.restore_checkpoint` go back exactly.\n\n\
-A call whose error starts `still running:` was not cancelled: don't send it again; `pending` waits for its result.";
+A call whose error starts `still running:` was not cancelled: don't send it again; `pending` waits for its result. \
+A call that timed out on your side is still running in the app too, and every call after it waits behind it: ask `running` \
+(it answers at once), wait or `cancel`, and never send the same change twice.\n\n\
+Which guide: `skill_reference` has one for each kind of work, read before the first call of that kind: solidcraft-modeling \
+(a new part), solidcraft-editing (changing or repairing an existing design, a feature with an error), solidcraft-mechanisms \
+(assemblies, joints, motion), solidcraft-sheetmetal, solidcraft-drawings, solidcraft-checking (is it right, comparing \
+versions), solidcraft-parts (libraries and versions). Anything else the app does (rendering, appearances and materials, \
+surfaces, configurations, exploded views, the camera and what is shown) is a command too: `list_commands` with a \
+prefix (render, appearance, material, surface, config, explode, view or inspect, each with a dot after it), then \
+`describe_command` before the first use. Never guess a command's name or parameters.\n\n\
+A drawing open: the model can be read (`inspect_design`, `body_topology`, `timeline.inspect`, `parameters.list`, the \
+project tools) but not changed or measured; `drawing.close` first, change it, then `drawing.open` again.\n\n\
+Leave it as you found it: experiments (a rolled-back timeline, a trial edit) end with `edit.restore_checkpoint` or \
+`timeline.roll_to {}` before you reply, whether or not they worked. Say done only for what you checked: when a check \
+failed, timed out or was skipped, say which, and what is left unverified.";
 
 /// The design files a call opens or saves (#7181): `open` and `save`, and the commands they run
 /// (`doc.open`, `file.save`, `file.save_as`) through `execute` or as `batch` steps. Each reads or

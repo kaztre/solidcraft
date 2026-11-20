@@ -53,6 +53,9 @@ Inspect one feature of each kind, not every copy.
 
 ## When something is already broken
 - **A feature has an `error` after opening:** read it with `timeline.inspect`, fix the input or definition, and recompute.
+- **"the reference … no longer exists as it was picked; reselect it":** an earlier feature changed the face or edge it was picked on. `timeline.inspect` shows the pick; `timeline.roll_to` that feature, find the face or edge as it is now (`body_topology`), set it with `timeline.edit`, then `timeline.roll_to {}`. Fix the earliest failing feature first: later ones often fail only because of it.
+- **A fillet or chamfer the kernel can't build:** compare its radius with the shortest edge it touches (`body_topology` gives each edge's `length`). A blend as large as a neighbouring edge is long has no room to end: use a smaller radius, leave those edges out, or remove the sliver upstream. Trying the same blend with other options rarely helps; after three failures tell the user what the geometry is and ask.
+- **After any trial at an earlier point of the timeline:** `timeline.roll_to {}` (or `edit.restore_checkpoint`) before you reply, worked or not. A design left rolled back looks to the user like missing parts.
 - **The app crashed:**
   - `crash_reports` lists the reports, and `crash_reports {id}` gives the command that crashed.
   - `execute doc.recovery_list` and then `doc.recover {id}` reopen the autosaved design.

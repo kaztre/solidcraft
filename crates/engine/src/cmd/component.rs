@@ -142,7 +142,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              fails while the design has unsaved changes (run file.save first) or something is open in it; asked during the agent's \
              turn it finishes once the turn ends (queued: true); elsewhere nothing changes",
         ),
-    CommandSpec::new("component.list", "List Components", crate::checked!("component.list", list))
+    CommandSpec::new("component.list", "List Components", crate::checked!("component.list", list)).any_part()
         .icon("list")
         .noundo()
         .contract(&LIST_CONTRACT)

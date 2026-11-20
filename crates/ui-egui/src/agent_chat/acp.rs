@@ -231,7 +231,11 @@ The open design is reachable through the `solidcraft-app` MCP server: use its to
 measure, screenshot, set_parameter, undo, skill_reference) to read and change the design the user is looking at, and verify with \
 measure or inspect_design. Before building anything beyond one primitive, read `skill_reference` for `solidcraft-modeling` (its \
 SKILL.md has the workflow, its reference.md the command shapes and this version's traps), work the numbers out first, and after \
-each stage compare `measure` with them. For a 2D drawing of a part, read `skill_reference` for `solidcraft-drawings` first. Prefer one `batch` over many small calls. Saving, opening or exporting files waits for the user's approval in \
+each stage compare `measure` with them. For a 2D drawing of a part, read `skill_reference` for `solidcraft-drawings` first; to change or repair an existing \
+design, `solidcraft-editing`; for assemblies and joints, `solidcraft-mechanisms`. For anything else the app does, find the \
+command with `list_commands` and read `describe_command` before using it: never guess a name. When a call times out, ask \
+`running` and wait: don't send it again. End every experiment by putting the design back (`edit.restore_checkpoint`, \
+`timeline.roll_to {}`), and say what you could not verify instead of calling it done. Prefer one `batch` over many small calls. Saving, opening or exporting files waits for the user's approval in \
 the chat, and each message allows a limited number of changes. Don't use shell or file tools: work through the SolidCraft tools. \
 Keep answers short.";
 

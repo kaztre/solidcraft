@@ -69,6 +69,13 @@ inspector checks it from the same sheet. Every feature has its size and its posi
 - A long name runs out of its cell: `drawing.inspect`'s `title_block_cells[].notes` says which.
 - Ask for what is empty (owner, drawn by, date) rather than leaving it or making it up.
 
+**Done means dimensioned.** A part sheet is finished when every feature someone must make is sized
+on it: `drawing.check {"sheet"}`'s `coverage` has no `not_covered` feature you haven't either
+dimensioned or named to the user as left out. A sheet of outline views with no dimensions is not a
+drawing: say it is unfinished rather than counting it. Bought-in parts (a motor, a connector, a
+bearing, a circuit board) get a row in the assembly's parts list, not a sheet of their own. If the
+last check or screenshot failed or timed out, say so and say what is unverified: never "ready".
+
 **Ask, don't invent.** Tolerances, fits, surface finishes, materials, part numbers and revision
 letters come from the user or from the project's own files (`project_search`, `project_read`). If
 the sheet needs one you don't have, ask once, listing them all.
@@ -128,7 +135,9 @@ dimensions and notes on each sheet.
   Opens the drawing. Reply: the drawing, with `sources: [{id}]` (the design itself is the first) and
   `sheets: [{id, name, size_mm, …}]`.
 - `drawing.list`, `drawing.open {"drawing": id}`, `drawing.close`. While a drawing is open the
-  model's commands wait; close it before changing the part.
+  model can be read (`inspect_design`, `body_topology`, `model.edges`, `timeline.inspect`,
+  `parameters.list`, `assembly.bom`, the project tools) but not changed or measured; close it
+  before changing the part.
 - `drawing.set`: `name`, `projection`, `units`, `font`, `line_group`, `updates` (`automatic` |
   `deferred`).
 - `drawing.sheet.add`: `name?`, `size?` (`{"standard":"a2"}` or `{"custom":{"sides_mm":[w,h]}}`),

@@ -4324,3 +4324,38 @@ fn sheet_sketch_creation_reserves_current_and_retired_image_ids() {
         }
     }
 }
+
+/// With a drawing open the model can still be read: an agent drawing a part reads its faces, edges,
+/// parameters and parts list for the dimensions it adds, and had to close the drawing for each read.
+/// Changing the model still waits for the drawing to close.
+#[test]
+fn the_model_can_be_read_while_a_drawing_is_open() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 100, "width": 50, "height": 20, "body_name": "Block"})).unwrap();
+    s.execute("drawing.create", &json!({})).unwrap();
+    for id in [
+        "document.inspect",
+        "model.edges",
+        "model.faces",
+        "timeline.inspect",
+        "parameters.list",
+        "assembly.bom",
+        "component.list",
+        "sketch.inspect",
+        "project.files",
+        "project.search",
+        "project.read",
+        "plugin.tools",
+        "library.parts.search",
+        "web.fetch",
+    ] {
+        let command = crate::find_command(id).unwrap_or_else(|| panic!("no command {id}"));
+        assert_eq!(command.allowed(&s), Ok(()), "{id}");
+    }
+    let edges = s.execute("model.edges", &json!({"body": "Block"})).unwrap();
+    assert_eq!(edges["edges"].as_array().map(Vec::len), Some(12), "{edges}");
+    assert!(s.execute("document.inspect", &json!({})).is_ok());
+    assert!(s.execute("parameters.list", &json!({})).is_ok());
+    let refused = s.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1})).unwrap_err().to_string();
+    assert!(refused.contains("a drawing is open"), "{refused}");
+}

@@ -35,4 +35,5 @@ A drawing a machinist can make the part from, without the model and without aski
 | "Add a heading, a status line, a view caption" | The title block says it. Leave the sheet to the part. |
 | "`offset_mm` puts it outside" | It counts from the midpoint of what is measured; use `line_through_mm`. |
 | "The reply says ok" | Look at the sheet. Overlaps and crowding show only there. |
+| "Views are placed, the sheet is done" | Done is every feature dimensioned (`coverage`). Say what isn't. |
 | "This tolerance is typical" | Ask. A guessed tolerance scraps parts. |

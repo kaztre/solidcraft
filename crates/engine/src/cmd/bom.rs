@@ -73,7 +73,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          (as its component again). One undo step → occurrence, bom_type (its own, or same_as_component), effective (the type it \
          counts as), changed",
     ),
-    CommandSpec::new("assembly.bom", "Bill of Materials", crate::checked!("assembly.bom", bom))
+    CommandSpec::new("assembly.bom", "Bill of Materials", crate::checked!("assembly.bom", bom)).any_part()
         .at("SOLID", "INSPECT")
         .icon("bom")
         .noundo()
