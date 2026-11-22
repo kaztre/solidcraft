@@ -419,6 +419,36 @@ fn redefining_an_extrude_names_new_optional_inputs() {
     assert_ne!(f.param_names[distance2_index], offset);
 }
 
+/// A field edit that adds an optional input names it and keeps the other names on their inputs.
+/// Left unnamed, reading the saved design named it, so the document read was not the one the
+/// file's saved model was made for: every open, and every Update Links of a design linking it,
+/// evaluated the whole timeline again.
+#[test]
+fn editing_a_field_names_new_optional_inputs() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": "5", "height": "30"}));
+    run(
+        &mut s,
+        "solid.thread",
+        json!({"face": [5, 0, 15], "from": [0, 0, 30], "designation": "M10x1.5", "length": "8 mm", "modeled": true,
+            "print_clearance": "0.05 mm", "name": "T"}),
+    );
+    let before = s.doc.find_feature("T").unwrap().clone();
+    assert_eq!(before.param_names.len(), 2);
+    run(&mut s, "timeline.edit", json!({"feature": "T", "set": {"chamfer_depth": "0.2 mm", "tip": "start"}}));
+    let f = s.doc.find_feature("T").unwrap();
+    let inputs = f.kind.inputs();
+    assert_eq!(inputs.len(), 3);
+    assert_eq!(f.param_names.len(), 3);
+    assert!(f.param_names.iter().all(|name| !name.is_empty()));
+    for (k, (label, _, _)) in before.kind.inputs().iter().enumerate() {
+        let now = inputs.iter().position(|(l, _, _)| l == label).unwrap();
+        assert_eq!(f.param_names[now], before.param_names[k], "{label} keeps its parameter name");
+    }
+    // Reading the design back changes nothing, so the model saved with it is the one it opens with.
+    assert_eq!(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap(), *s.doc);
+}
+
 #[test]
 fn redefining_a_shell_replaces_persistent_face_selection() {
     let mut s = Session::default();

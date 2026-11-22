@@ -1618,9 +1618,21 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     // A one-sided extrude made symmetric remembers the way it went, so what was picked on its
     // start cap is still found on the cap facing the same way.
     solidcraft_doc::keep_one_sided_direction(&s.model, &f, &mut nf);
+    // A field set here can add or drop an optional input (a thread's chamfer), which moves the
+    // inputs after it: each name stays on the input it was given to, and a new input is named
+    // now, as a redefine names it. Left unnamed, it was named when the design was next read, so
+    // the model the file kept no longer matched its document and every open, and every Update
+    // Links of a design linking it, evaluated the whole timeline again.
+    let (old_keys, new_keys) = (input_keys(&f.kind), input_keys(&nf.kind));
+    if old_keys != new_keys {
+        let mut named: Vec<_> = old_keys.into_iter().zip(&f.param_names).collect();
+        nf.param_names =
+            new_keys.iter().map(|key| named.iter().position(|(k, _)| k == key).map(|at| named.remove(at).1.clone()).unwrap_or_default()).collect();
+    }
     if let Some(slot) = s.doc_mut().feature_mut(id) {
         *slot = nf;
     }
+    s.doc_mut().name_feature_inputs(id);
     s.refresh();
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
