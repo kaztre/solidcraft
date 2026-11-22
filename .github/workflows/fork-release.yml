@@ -145,7 +145,6 @@ jobs:
           path: |
             target/${{ matrix.target }}/release/solidcraft
             target/${{ matrix.target }}/release/solidcraft-cli
-            target/${{ matrix.target }}/release/solvecraft-cli
           if-no-files-found: error
 
   macos:
@@ -178,7 +177,6 @@ jobs:
         run: packaging/macos/signing.sh --setup
       - name: Join, sign, package and check (dmg, CLI zip)
         run: |
-          chmod +x target/*-apple-darwin/release/solidcraft target/*-apple-darwin/release/solidcraft-cli target/*-apple-darwin/release/solvecraft-cli
           packaging/macos/package.sh --arch universal --skip-build ${MACOS_SIGN_IDENTITY:+--sign}
       - name: Remove the signing keychain and API key
         if: always()
