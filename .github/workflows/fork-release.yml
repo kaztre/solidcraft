@@ -177,6 +177,8 @@ jobs:
         run: packaging/macos/signing.sh --setup
       - name: Join, sign, package and check (dmg, CLI zip)
         run: |
+          # Artifacts don't keep the executable bit.
+          chmod +x target/*-apple-darwin/release/solidcraft target/*-apple-darwin/release/solidcraft-cli
           packaging/macos/package.sh --arch universal --skip-build ${MACOS_SIGN_IDENTITY:+--sign}
       - name: Remove the signing keychain and API key
         if: always()
