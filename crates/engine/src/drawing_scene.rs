@@ -657,8 +657,12 @@ fn build_from(s: &Session, drawing: &Drawing, sheet: u64, state: Option<&Arc<Mod
     // Each drawn view's bodies with the world state of the session it drew from: a view that draws its
     // parts apart has its copy's, as the sheet shows them.
     let state_of = |choice: &Choice| Some(shown.get(choice)?.as_ref().ok()?.state.clone());
-    let mut drawn: Vec<(u64, Arc<ModelState>, Arc<Owners>)> =
-        owners.into_iter().filter_map(|(id, choice, of)| Some((id, state_of(&choice)?, of))).chain(taken).filter(|(id, ..)| in_scene(&views, *id)).collect();
+    let mut drawn: Vec<(u64, Arc<ModelState>, Arc<Owners>)> = owners
+        .into_iter()
+        .filter_map(|(id, choice, of)| Some((id, state_of(&choice)?, of)))
+        .chain(taken)
+        .filter(|(id, ..)| in_scene(&views, *id))
+        .collect();
     drawn.sort_by_key(|(id, ..)| *id);
     let drawn = drawn.into_iter().map(|(_, state, of)| (state, of)).collect();
     Ok((SheetScene { scene, views, objects, dimensions, notes, balloons, tables, tags, out_of_date, drawn, sketches, fills }, built))

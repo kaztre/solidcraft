@@ -25,7 +25,8 @@ const MAX_LINKS: usize = 300;
 const MAX_ZIP_FILES: usize = 50;
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("web.fetch", "Read Web Page", crate::checked!("web.fetch", fetch)).any_part()
+    CommandSpec::new("web.fetch", "Read Web Page", crate::checked!("web.fetch", fetch))
+        .any_part()
         .icon("chain")
         .noundo()
         .contract(&FETCH_CONTRACT)
